@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from reffie.routers import health
+from reffie.routers import accounts, checklist, health, pocs
 
 app = FastAPI(
     title="Reffie Onboarding API",
@@ -10,3 +10,6 @@ app = FastAPI(
 )
 
 app.include_router(health.router, tags=["system"])
+app.include_router(accounts.router)
+app.include_router(checklist.router)
+app.include_router(pocs.router)
