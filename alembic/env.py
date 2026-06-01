@@ -4,11 +4,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from reffie.config import settings
-from reffie.db.base import Base
-
 # Import all models so autogenerate can detect them.
 import reffie.models  # noqa: F401
+from reffie.config import settings
+from reffie.db.base import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

@@ -52,9 +52,7 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
-    "ANN101", # missing type for self
-    "ANN102", # missing type for cls
-    "S101",   # use of assert (fine in tests)
+    "S101", # use of assert (fine in tests)
 ]
 
 [tool.ruff.lint.isort]
