@@ -38,7 +38,7 @@ def make_account(**kwargs: object) -> Account:
 def mock_session() -> AsyncMock:
     """Async mock that satisfies the AsyncSession interface used by the routers."""
     session = AsyncMock()
-    session.add = MagicMock()      # sync method on AsyncSession
+    session.add = MagicMock()  # sync method on AsyncSession
     session.add_all = MagicMock()  # sync method on AsyncSession
     session.commit = AsyncMock()
     session.delete = AsyncMock()

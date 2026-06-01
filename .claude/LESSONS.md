@@ -4,6 +4,22 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-01 — CRUD endpoints (accounts, checklist, pocs)
+
+- **Async SQLAlchemy requires eager loading everywhere**: accessing a relationship attribute on a persistent object without `selectinload` (or `joinedload`) raises `MissingGreenlet`. Always use `.options(selectinload(...))` on any query that will need relationship data in the response.
+
+- **`server_default` is NOT a Python-side default**: `mapped_column(server_default=sa.text("''"))` sets the DB DDL default. The Python object has `None` until the INSERT is executed and a `refresh()` is done. When creating new ORM objects (especially in test code with mocked sessions), set `done=False`, `note=""`, etc. explicitly — do not rely on server defaults being present on the Python instance.
+
+- **`mapped_column(default=uuid.uuid4)` does NOT set `id` at `__init__` time**: Same issue as server_default. The callable `default=` is invoked when SQLAlchemy generates INSERT SQL, not during `__init__`. Always pass `id=uuid.uuid4()` explicitly when creating ORM objects that will be used before a real DB flush.
+
+- **`AsyncMock()` wraps ALL methods as coroutines**: `AsyncSession.add()` and `AsyncSession.add_all()` are sync methods. When `AsyncMock()` is used as a session mock, calling these generates `RuntimeWarning: coroutine never awaited`. Explicitly set `session.add = MagicMock()` and `session.add_all = MagicMock()` in mock fixtures.
+
+- **`pytest.Generator` does not exist**: Use `collections.abc.Generator` for yield-fixture return type annotations. Similarly use `collections.abc.AsyncGenerator` for async generator return types.
+
+- **`dependency_overrides` with async generator**: To override `get_db_session` (async generator), the override must also be an async generator: `async def fake_db() -> AsyncGenerator[AsyncSession, None]: yield mock_session`. Use `# type: ignore[misc]` on the yield line to suppress the intentional type mismatch (mock vs real session).
+
+- **POST then re-query pattern for responses**: After `add()` + `flush()` + `commit()`, re-query the newly created object with `selectinload` to get a fully loaded instance for the `AccountDetail` response. This adds one query but keeps the response consistent with GET detail.
+
 ## 2026-06-01 — Google JWT auth middleware
 
 - **ruff `B008` fires on `Depends()`**: FastAPI's dependency injection uses function calls in default arguments by design. Add `"B008"` to ruff's global `ignore` list for any FastAPI project — it will fire on every route that uses `Depends()`.

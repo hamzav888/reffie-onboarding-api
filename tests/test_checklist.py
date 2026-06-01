@@ -45,7 +45,7 @@ def make_checklist_item(account_id: uuid.UUID, step_id: str = "step__one") -> Ch
 @pytest.fixture
 def mock_session() -> AsyncMock:
     session = AsyncMock()
-    session.add = MagicMock()      # sync method on AsyncSession
+    session.add = MagicMock()  # sync method on AsyncSession
     session.commit = AsyncMock()
     session.flush = AsyncMock()
     return session
