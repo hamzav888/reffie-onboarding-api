@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.3.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
+    "google-auth[requests]>=2.53.0",
 ]
 
 [project.optional-dependencies]
@@ -52,7 +53,9 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
-    "S101", # use of assert (fine in tests)
+    "S101",   # use of assert (fine in tests)
+    "ANN401", # Any is legitimate for external API response payloads
+    "B008",   # Depends() in default args is the FastAPI DI pattern
 ]
 
 [tool.ruff.lint.isort]

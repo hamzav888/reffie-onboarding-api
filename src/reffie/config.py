@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str
     hubspot_token: str
     jwt_secret: str
+    google_client_id: str
 
 
 settings = Settings()  # type: ignore[call-arg]
