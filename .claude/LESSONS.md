@@ -4,6 +4,20 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-01 — Google JWT auth middleware
+
+- **ruff `B008` fires on `Depends()`**: FastAPI's dependency injection uses function calls in default arguments by design. Add `"B008"` to ruff's global `ignore` list for any FastAPI project — it will fire on every route that uses `Depends()`.
+
+- **pyright strict + unstubbed libraries**: `reportMissingTypeStubs = false` suppresses the import warning, but `reportUnknownMemberType` still fires when calling functions from the unstubbed module. Suppress at the specific call site with `# pyright: ignore[reportUnknownMemberType]` rather than a blanket `# type: ignore`.
+
+- **`HTTPBearer(auto_error=False)` for 401 on missing tokens**: FastAPI's default `HTTPBearer()` returns 403 when no Bearer token is present. Use `auto_error=False` and check `if credentials is None` manually to return 401 consistently.
+
+- **`reportUnusedFunction` on FastAPI route functions with `_` prefix**: pyright strict flags `_private_fn` as unused if never explicitly called. FastAPI route functions are consumed by the decorator, not called directly — avoid the `_` prefix on route handlers.
+
+- **`conftest.py` must set env vars at module level, not in fixtures**: `reffie.config` instantiates `Settings()` at import time. By the time a fixture runs, the module is already imported. Set `os.environ.setdefault(...)` at the top of `conftest.py` (outside any function) so values are present before pytest collects test modules.
+
+- **Mock target for parent-module imports**: When auth.py does `import google.oauth2.id_token as google_id_token`, the mock target is `"google.oauth2.id_token.verify_oauth2_token"` (the canonical module path), not `"reffie.auth.google_id_token.verify_oauth2_token"`. Both work because the alias refers to the same module object.
+
 ## 2026-06-01 — Initial model scaffold
 
 - **ruff `ANN101`/`ANN102` removed**: These rules no longer exist in ruff 0.5+. Remove them from `pyproject.toml` `[tool.ruff.lint] ignore` list or ruff will warn on every run.
