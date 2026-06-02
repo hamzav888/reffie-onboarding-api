@@ -103,6 +103,120 @@ async def get_contact_properties(contact_id: str, properties: list[str]) -> dict
     return result
 
 
+async def get_deal_stage(deal_id: str, settings: Settings) -> str | None:
+    """
+    Fetch only the ``dealstage`` property for a HubSpot deal.
+
+    Used inside background tasks to confirm the deal is still Closed Won at
+    processing time (the webhook may be delayed and the stage may have moved).
+
+    :param deal_id: HubSpot deal object ID.
+    :param settings: Application settings providing the HubSpot credentials.
+    :returns: The ``dealstage`` property value, or ``None`` if absent.
+    :raises HubSpotNotFoundError: If the deal does not exist.
+    :raises HubSpotAPIError: For other 4xx/5xx responses.
+    """
+    async with httpx.AsyncClient(
+        base_url=settings.hubspot_base_url,
+        headers={"Authorization": f"Bearer {settings.hubspot_token}"},
+    ) as client:
+        response = await client.get(
+            f"/crm/v3/objects/deals/{deal_id}",
+            params={"properties": "dealstage"},
+        )
+    _check_response(response, f"deal {deal_id}")
+    data: dict[str, Any] = response.json()
+    val = data.get("properties", {}).get("dealstage")
+    return str(val) if val is not None else None
+
+
+async def get_deal_quote_ids(deal_id: str, settings: Settings) -> list[str]:
+    """
+    Return associated quote IDs for a HubSpot deal.
+
+    Uses the v3 associations API (``/crm/v3/objects/deals/{id}/associations/quotes``).
+    The v3 response embeds ``id`` directly on each result (unlike v4 which uses
+    ``toObjectId``).
+
+    :param deal_id: HubSpot deal object ID.
+    :param settings: Application settings providing the HubSpot credentials.
+    :returns: List of quote object ID strings (may be empty).
+    :raises HubSpotNotFoundError: If the deal does not exist.
+    :raises HubSpotAPIError: For other 4xx/5xx responses.
+    """
+    async with httpx.AsyncClient(
+        base_url=settings.hubspot_base_url,
+        headers={"Authorization": f"Bearer {settings.hubspot_token}"},
+    ) as client:
+        response = await client.get(
+            f"/crm/v3/objects/deals/{deal_id}/associations/quotes",
+        )
+    _check_response(response, f"deal {deal_id} quote associations")
+    data: dict[str, Any] = response.json()
+    results: list[dict[str, Any]] = data.get("results", [])
+    return [str(r["id"]) for r in results]
+
+
+async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[str, Any]]:
+    """
+    Return line items for a HubSpot quote as a normalised list.
+
+    Two-step fetch:
+
+    1. ``GET /crm/v3/objects/quotes/{id}/associations/line_items`` — collect IDs.
+    2. ``POST /crm/v3/objects/line_items/batch/read`` — batch-fetch properties.
+
+    Each returned item contains ``id``, ``name``, ``sku``, ``quantity``, ``price``.
+
+    :param quote_id: HubSpot quote object ID.
+    :param settings: Application settings providing the HubSpot credentials.
+    :returns: List of line-item dicts (may be empty).
+    :raises HubSpotNotFoundError: If the quote does not exist.
+    :raises HubSpotAPIError: For other 4xx/5xx responses.
+    """
+    async with httpx.AsyncClient(
+        base_url=settings.hubspot_base_url,
+        headers={"Authorization": f"Bearer {settings.hubspot_token}"},
+    ) as client:
+        assoc_response = await client.get(
+            f"/crm/v3/objects/quotes/{quote_id}/associations/line_items",
+        )
+    _check_response(assoc_response, f"quote {quote_id} line item associations")
+    assoc_data: dict[str, Any] = assoc_response.json()
+    li_ids = [str(r["id"]) for r in assoc_data.get("results", [])]
+
+    if li_ids == []:
+        return []
+
+    async with httpx.AsyncClient(
+        base_url=settings.hubspot_base_url,
+        headers={"Authorization": f"Bearer {settings.hubspot_token}"},
+    ) as client:
+        batch_response = await client.post(
+            "/crm/v3/objects/line_items/batch/read",
+            json={
+                "properties": ["name", "sku", "quantity", "price"],
+                "inputs": [{"id": li_id} for li_id in li_ids],
+            },
+        )
+    _check_response(batch_response, f"line_items batch for quote {quote_id}")
+    batch_data: dict[str, Any] = batch_response.json()
+
+    items: list[dict[str, Any]] = []
+    for result in batch_data.get("results", []):
+        props: dict[str, Any] = result.get("properties", {})
+        items.append(
+            {
+                "id": str(result.get("id", "")),
+                "name": props.get("name") or "",
+                "sku": props.get("sku") or "",
+                "quantity": props.get("quantity") or "",
+                "price": props.get("price") or "",
+            }
+        )
+    return items
+
+
 TECH_STACK_PROPERTIES: list[str] = [
     "pms_system",
     "tour_scheduling_platform",

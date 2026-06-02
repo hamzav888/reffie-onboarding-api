@@ -4,6 +4,34 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-02 — GitHub Actions + Railway deployment
+
+- **`uv sync --locked` requires `uv.lock` committed to git**: CI runs `uv sync --locked` which verifies the lockfile matches `pyproject.toml`. If `uv.lock` is absent or gitignored, CI fails at the install step. Always commit `uv.lock`.
+
+- **Railway Nixpacks does not reliably auto-detect uv**: Even though Nixpacks added uv support in 2024, detection is version-dependent. Provide an explicit `nixpacks.toml` that installs uv via the install script (`curl -LsSf https://astral.sh/uv/install.sh | sh`) and calls `uv sync --locked --no-dev`. This is belt-and-suspenders but avoids mysterious build failures on Railway.
+
+- **Run Alembic migrations as part of `startCommand`**: Include `alembic upgrade head &&` before starting uvicorn in `railway.toml`'s `startCommand`. This makes deploys self-healing — any migration committed alongside code is applied on the next deploy. If the migration fails, Railway rolls back to the previous image. Never assume the DB schema is already up to date.
+
+- **GitHub Actions deploy job must be gated on `github.event_name == 'push'`**: The `if:` condition `github.event_name == 'push' && github.ref == 'refs/heads/main'` prevents the deploy job from running on PRs. Without the `event_name` check, a PR from a branch named `main` (or targeting `main`) could trigger Railway deployment. Always gate deploys on both the event type and the ref.
+
+- **Project in a subdirectory requires `defaults.run.working-directory`**: When the Python project lives in a subdirectory of the git repo (e.g. `reffie-onboarding-api/`), add `defaults: run: working-directory: reffie-onboarding-api` to the workflow. All `uv run`, `ruff`, `pyright`, and `railway up` commands then resolve paths relative to the project root without per-step `cd`. `railway.toml` and `nixpacks.toml` belong in the project subdirectory, not the git root.
+
+---
+
+## 2026-06-02 — HubSpot webhook integration
+
+- **HubSpot webhook signature verification (HMAC-SHA256)**: HubSpot signs requests with the V3 signature scheme. The expected signature is `SHA-256(client_secret + HTTP_method + full_URI + raw_body)` as a hex digest, sent in the `X-HubSpot-Signature-V3` header. Always compare with `hmac.compare_digest` (constant-time). Return 401 on missing or invalid signature. The secret is the HubSpot app's **client secret** (not the portal API key) — store it in `HUBSPOT_WEBHOOK_SECRET`.
+
+- **HubSpot deal stage IDs are pipeline-specific internal identifiers, not labels**: The `dealstage` property value sent in webhook events is an opaque internal ID like `"closedwon"` or `"8b76c620-..."`, not a human-readable label. Labels vary by portal and pipeline. Store the recognised Closed Won stage IDs as a configurable list (`HUBSPOT_CLOSED_WON_STAGE_IDS`, comma-separated in the env) so new pipelines can be added without code changes.
+
+- **Quote line items require a two-step fetch**: There is no single endpoint that returns a quote's line items with properties. Step 1: `GET /crm/v3/objects/quotes/{id}/associations/line_items` — returns a list of `{id}` objects (NOT `toObjectId`, unlike the v4 associations API). Step 2: `POST /crm/v3/objects/line_items/batch/read` with `{"properties": ["name","sku","quantity","price"], "inputs": [{"id": "..."}]}` — returns the full line item objects. Skip step 2 and return `[]` early if the associations list is empty.
+
+- **Webhook handlers must return 200 immediately — never block on side effects**: HubSpot retries webhooks that don't receive a 2xx response quickly. Use FastAPI `BackgroundTasks` to dispatch all processing (DB writes, further API calls) after returning `{"status": "ok"}`. Background tasks open their own `AsyncSessionLocal()` session (same as the writeback pattern) because the request-scoped session is already closed when the task runs.
+
+- **pydantic-settings raises before field_validators can run for list fields from env**: For `list[str]` fields, `EnvSettingsSource` calls `decode_complex_value` (which does `json.loads`) at the *source* level — the JSON decode exception is re-raised as `SettingsError` before Pydantic ever runs `@field_validator`. The fix is NOT a `field_validator` alone. Override `decode_complex_value` in subclasses of both `EnvSettingsSource` and `DotEnvSettingsSource` to fall back to comma-separated parsing on `ValueError`, then inject both via `settings_customise_sources`. `@field_validator` can still remain as a fallback for values that bypass the source (e.g. direct `Settings(...)` instantiation), but it is NOT what saves the env-var case.
+
+---
+
 ## 2026-06-02 — HubSpot Company associations
 
 - **Fetching a deal's associated company requires a separate API call**: HubSpot's deal object does not embed the company; it must be retrieved via `/crm/v4/objects/deals/{deal_id}/associations/companies`. An empty `results` array means no company is associated (not a 404). The v4 response contains `toObjectId` per associated object — take `results[0]["toObjectId"]` for the primary company. Company properties are then fetched separately via `/crm/v3/objects/companies/{company_id}?properties=...`.

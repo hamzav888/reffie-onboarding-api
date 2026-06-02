@@ -7,3 +7,5 @@ os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/
 os.environ.setdefault("HUBSPOT_TOKEN", "test-token")
 os.environ.setdefault("JWT_SECRET", "test-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
+os.environ.setdefault("HUBSPOT_WEBHOOK_SECRET", "test-webhook-secret")
+os.environ.setdefault("HUBSPOT_CLOSED_WON_STAGE_IDS", "closedwon")
