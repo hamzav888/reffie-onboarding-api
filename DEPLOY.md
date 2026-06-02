@@ -5,7 +5,7 @@
 Every push to `main` triggers the GitHub Actions workflow (`.github/workflows/deploy.yml`):
 
 1. **CI job** — runs lint, format check, pyright, and pytest in the `reffie-onboarding-api/` directory.
-2. **Deploy job** — runs only if CI passes AND the event is a push to `main` (not a PR). Calls `railway up --ci --service reffie-onboarding-api` which triggers a Nixpacks build on Railway and applies the new image.
+2. **Deploy job** — runs only if CI passes AND the event is a push to `main` (not a PR). Calls `railway up --ci --service supportive-warmth` which triggers a Nixpacks build on Railway and applies the new image.
 
 PRs to `main` run CI only — no deploy.
 
@@ -40,7 +40,7 @@ Set these in **Railway → Service → Variables** before the first deploy:
 
 ## First-deploy gotchas
 
-**Service not yet provisioned**: If the Railway service named `reffie-onboarding-api` does not exist yet, `railway up` auto-provisions it on first run. The build may take 2–3 minutes longer than subsequent deploys.
+**Service not yet provisioned**: If the Railway service named `supportive-warmth` does not exist yet, `railway up` auto-provisions it on first run. The build may take 2–3 minutes longer than subsequent deploys.
 
 **Port binding**: Railway injects `$PORT` at runtime. The start command binds uvicorn to `$PORT` — do not hardcode a port. Railway's health check hits `/health` to confirm the service is listening.
 
