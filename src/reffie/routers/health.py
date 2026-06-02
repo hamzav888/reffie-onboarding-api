@@ -15,4 +15,4 @@ async def health_check() -> HealthResponse:
 
     :returns: JSON payload confirming the service is running.
     """
-    return HealthResponse(status="ok")
+    return HealthResponse.model_validate({"status": "ok"})

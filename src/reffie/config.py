@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     database_url: str
     hubspot_token: str
+    hubspot_base_url: str = "https://api.hubapi.com"
     jwt_secret: str
     google_client_id: str
 

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from reffie.hubspot import router as hubspot_router
 from reffie.routers import accounts, checklist, health, pocs
 
 app = FastAPI(
@@ -13,3 +14,4 @@ app.include_router(health.router, tags=["system"])
 app.include_router(accounts.router)
 app.include_router(checklist.router)
 app.include_router(pocs.router)
+app.include_router(hubspot_router.router)
