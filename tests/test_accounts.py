@@ -2,6 +2,7 @@ import uuid
 from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime
 from decimal import Decimal
+from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -60,6 +61,16 @@ def override_deps(mock_session: AsyncMock) -> Generator[None]:
     app.dependency_overrides[get_db_session] = fake_db
     yield
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def mock_writeback() -> Generator[None]:
+    """Suppress HubSpot write-back background tasks — tests don't need a real DB session."""
+    with mock.patch(
+        "reffie.hubspot.writeback.sync_stage_to_hubspot",
+        new=AsyncMock(),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ from typing import Any
 import httpx
 
 import reffie.config as config_module
+from reffie.config import Settings
 
 
 class HubSpotError(Exception):
@@ -100,3 +101,32 @@ async def get_contact_properties(contact_id: str, properties: list[str]) -> dict
     _check_response(response, f"contact {contact_id}")
     result: dict[str, Any] = response.json()
     return result
+
+
+async def update_deal_properties(
+    deal_id: str,
+    properties: dict[str, str],
+    settings: Settings,
+) -> None:
+    """
+    PATCH deal properties in HubSpot CRM.
+
+    :param deal_id: HubSpot deal object ID.
+    :param properties: Property name/value pairs to write. ``kickoff_call_date``
+        is permanently forbidden — passing it raises :class:`ValueError` immediately.
+    :param settings: Application settings providing the HubSpot credentials.
+    :raises ValueError: If ``kickoff_call_date`` appears in ``properties``.
+    :raises HubSpotNotFoundError: If the deal does not exist.
+    :raises HubSpotAPIError: For other 4xx/5xx responses.
+    """
+    if "kickoff_call_date" in properties:
+        raise ValueError("kickoff_call_date is read-only and must never be written back to HubSpot")
+    async with httpx.AsyncClient(
+        base_url=settings.hubspot_base_url,
+        headers={"Authorization": f"Bearer {settings.hubspot_token}"},
+    ) as client:
+        response = await client.patch(
+            f"/crm/v3/objects/deals/{deal_id}",
+            json={"properties": properties},
+        )
+    _check_response(response, f"deal {deal_id}")

@@ -78,7 +78,7 @@ def make_loaded_account() -> Account:
         location="New York, NY",
         property_type="multifamily",
         cs_rep="Alice",
-        onboarding_stage="kick-off",
+        onboarding_stage="Pre-kick off",
         skipped_stages=[],
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -185,14 +185,29 @@ async def test_sync_creates_new_account(mock_session: AsyncMock) -> None:
     body = response.json()
     assert body["company_name"] == "Acme Corp"
     assert body["cs_rep"] == "Alice"
-    assert body["onboarding_stage"] == "kick-off"
+    # New accounts start at the first platform stage — HubSpot does not own onboarding_stage.
+    assert body["onboarding_stage"] == "Pre-kick off"
     assert body["location"] == "New York, NY"
     mock_session.add.assert_called_once()
 
 
 async def test_sync_updates_existing_account(mock_session: AsyncMock) -> None:
     existing = make_synced_account()
-    loaded = make_loaded_account()
+    # Final SELECT returns account with the existing stage preserved — sync must not overwrite it.
+    loaded = Account(
+        id=existing.id,
+        hubspot_deal_id=_DEAL_ID,
+        company_name="Acme Corp",
+        location="New York, NY",
+        property_type="multifamily",
+        cs_rep="Alice",
+        onboarding_stage="pre-kick-off",  # same as existing, not overwritten by HubSpot data
+        skipped_stages=[],
+        created_at=existing.created_at,
+        updated_at=existing.updated_at,
+    )
+    loaded.pocs = []
+    loaded.checklist_items = []
     _setup_existing_account_session(mock_session, existing, loaded)
 
     with (
@@ -216,6 +231,8 @@ async def test_sync_updates_existing_account(mock_session: AsyncMock) -> None:
     # Account fields were overwritten from HubSpot data
     assert response.json()["company_name"] == "Acme Corp"
     assert response.json()["cs_rep"] == "Alice"
+    # onboarding_stage must NOT be overwritten — the platform owns it
+    assert response.json()["onboarding_stage"] == "pre-kick-off"
     # add() was NOT called because the account already existed
     mock_session.add.assert_not_called()
 

@@ -1,11 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+import reffie.hubspot.writeback as writeback
 from reffie.auth import CurrentUser, get_current_user
+from reffie.config import Settings, get_settings
 from reffie.db.session import get_db_session
 from reffie.models import Account
 from reffie.schemas.account import AccountCreate, AccountDetail, AccountSummary, AccountUpdate
@@ -72,15 +74,22 @@ async def get_account(
 @router.post("", response_model=AccountDetail, status_code=201)
 async def create_account(
     body: AccountCreate,
+    background_tasks: BackgroundTasks,
     db_session: AsyncSession = Depends(get_db_session),
     _current_user: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> AccountDetail:
     """
     Create a new account and return its full detail.
 
+    Triggers a background task to sync the initial stage to HubSpot if the
+    account has a ``hubspot_deal_id``.
+
     :param body: Account creation payload.
+    :param background_tasks: FastAPI background task queue.
     :param db_session: Injected database session.
     :param _current_user: Authenticated user (required, not used directly).
+    :param settings: Application settings (passed to the background task).
     :returns: :class:`~reffie.schemas.account.AccountDetail` for the new account.
     """
     account = Account(**body.model_dump())
@@ -88,6 +97,7 @@ async def create_account(
     await db_session.flush()
     await db_session.commit()
     account = await _load_account_detail(account.id, db_session)
+    background_tasks.add_task(writeback.sync_stage_to_hubspot, account.id, settings)
     return AccountDetail.model_validate(account)
 
 
@@ -95,16 +105,22 @@ async def create_account(
 async def patch_account(
     account_id: uuid.UUID,
     body: AccountUpdate,
+    background_tasks: BackgroundTasks,
     db_session: AsyncSession = Depends(get_db_session),
     _current_user: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> AccountDetail:
     """
     Partially update an account — only fields present in the request body are changed.
 
+    Triggers a background task to sync the updated stage to HubSpot.
+
     :param account_id: UUID of the account to update.
     :param body: Fields to update; absent fields are ignored.
+    :param background_tasks: FastAPI background task queue.
     :param db_session: Injected database session.
     :param _current_user: Authenticated user (required, not used directly).
+    :param settings: Application settings (passed to the background task).
     :returns: Updated :class:`~reffie.schemas.account.AccountDetail`.
     :raises HTTPException: 404 if the account does not exist.
     """
@@ -113,6 +129,7 @@ async def patch_account(
         setattr(account, field, value)
     await db_session.flush()
     await db_session.commit()
+    background_tasks.add_task(writeback.sync_stage_to_hubspot, account.id, settings)
     return AccountDetail.model_validate(account)
 
 

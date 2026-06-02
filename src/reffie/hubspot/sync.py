@@ -8,13 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 import reffie.hubspot.client as hubspot_client
+from reffie.constants import PLATFORM_STAGES
 from reffie.models import Account, Poc
 
 _DEAL_PROPERTIES: list[str] = [
     "dealname",
     "hs_object_id",
     "onboarding_cs_rep",
-    "onboarding_stage",
     "kickoff_call_date",
     "amount",
     "contract_length",
@@ -99,7 +99,9 @@ def _apply_deal_fields_to_account(account: Account, props: dict[str, Any], deal_
     account.location = ", ".join(filter(None, [city, state])) or "Unknown"
     account.property_type = _str(props, "property_type") or "Unknown"
     account.cs_rep = _str(props, "onboarding_cs_rep") or "Unassigned"
-    account.onboarding_stage = _str(props, "onboarding_stage") or "pre-kick-off"
+    # onboarding_stage is intentionally NOT set here — the platform owns it.
+    # New accounts receive PLATFORM_STAGES[0] at creation time; existing accounts
+    # keep whatever stage they are at.
     account.arr = _parse_decimal(props, "amount")
     account.contract_length = _str_or_none(props, "contract_length")
     account.success_metrics = _str_or_none(props, "success_metrics")
@@ -167,7 +169,8 @@ async def pull_deal(deal_id: str, db_session: AsyncSession) -> Account:
             location="",
             property_type="",
             cs_rep="",
-            onboarding_stage="",
+            # Platform owns onboarding_stage; new accounts start at the first stage.
+            onboarding_stage=PLATFORM_STAGES[0],
         )
         db_session.add(account)
 

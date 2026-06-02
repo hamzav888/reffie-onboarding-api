@@ -4,6 +4,18 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-02 — HubSpot write-back & background tasks
+
+- **Background tasks open their own DB session**: FastAPI runs background tasks after the HTTP response is sent. The request-scoped `AsyncSession` is already closed by then. Never pass the request's `db_session` to a background task — instead, open a fresh session inside the task function using `AsyncSessionLocal()`. Accepting `account_id: UUID` (not `account: Account`) forces the task to re-fetch state from a live session.
+
+- **Mock `AsyncSessionLocal` by patching at the source**: `writeback.py` imports `reffie.db.session as db_session_module` and calls `db_session_module.AsyncSessionLocal()`. Patching `reffie.db.session.AsyncSessionLocal` works because the module alias and the canonical path refer to the same attribute on the same module object. The mock must behave as an async context manager: set `mock_session.__aenter__ = AsyncMock(return_value=mock_session)` and `mock_session.__aexit__ = AsyncMock(return_value=False)`.
+
+- **Background tasks fire during test `await client.post(...)` — must be mocked in router tests**: When a router adds a background task, it runs inline during the ASGI call in tests (Starlette's `BackgroundTasks` run before the client receives the response). If the background task opens a real DB connection, integration-only tests without a real DB will crash. Add an `autouse=True` fixture that patches `reffie.hubspot.writeback.sync_stage_to_hubspot` with `AsyncMock()` in any router test file that does not want to test write-back side effects.
+
+- **Read-only field guard in `update_deal_properties`**: `kickoff_call_date` is permanently read-only from the HubSpot side — any attempt to write it would silently corrupt the value. Added an explicit `if "kickoff_call_date" in properties: raise ValueError(...)` guard at the top of `update_deal_properties`. This makes the invariant enforced in code, not just documented.
+
+- **`N812` ruff rule fires on `settings as _SETTINGS`**: Ruff's N812 rule disallows importing a lowercase name as a non-lowercase alias. Use `settings as _settings` (all-lowercase with underscore) in test files; constants in test helpers should be all-caps only when they're true literals, not imported singleton instances.
+
 ## 2026-06-02 — HubSpot integration
 
 - **`_apply_deal_fields_to_account` helper avoids `**dict` and create/update duplication**: For upsert logic that must apply the same field mapping to both new and existing ORM instances, write a helper that mutates the object in place (`account.company_name = ...`). This is fully type-safe (no `**dict[str, Any]` unpacking), avoids repeating the mapping twice, and works for both create and update paths.

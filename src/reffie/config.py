@@ -12,3 +12,8 @@ class Settings(BaseSettings):
 
 
 settings = Settings()  # type: ignore[call-arg]
+
+
+def get_settings() -> Settings:
+    """FastAPI dependency that returns the application settings singleton."""
+    return settings
