@@ -4,6 +4,20 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-02 — HubSpot integration
+
+- **`_apply_deal_fields_to_account` helper avoids `**dict` and create/update duplication**: For upsert logic that must apply the same field mapping to both new and existing ORM instances, write a helper that mutates the object in place (`account.company_name = ...`). This is fully type-safe (no `**dict[str, Any]` unpacking), avoids repeating the mapping twice, and works for both create and update paths.
+
+- **`Account(id=uuid4(), company_name="", ...)` for create before field-fill**: When creating a new SQLAlchemy model that immediately has fields applied via a helper function, initialize required non-nullable columns with empty defaults first (to satisfy pyright's generated `__init__` signature), then call the mutation helper. The empty strings are never visible — the helper overwrites them.
+
+- **Mock three `execute` calls in upsert tests**: `pull_deal` always calls `execute` three times: (1) `select(Account)` upsert check, (2) `delete(Poc)` bulk delete, (3) final `select(Account).options(selectinload(...))`. Tests must configure `mock_session.execute.side_effect` as a list of three mock results. The delete result is unused — `MagicMock()` suffices.
+
+- **`result.scalar_one()` (not `scalar_one_or_none`) for final selectinload**: After `flush()` + `commit()`, re-querying for the freshly inserted row uses `.scalar_one()` — the row is guaranteed to exist at this point. Mocking must match: `final_result.scalar_one.return_value = account`, not `scalar_one_or_none`.
+
+- **httpx is already a project dependency**: `httpx` was included in the scaffold's `pyproject.toml`. Running `uv add httpx` when it already exists is a no-op but safe. Check before adding to avoid duplicate entries.
+
+- **`mock.patch` with `new=AsyncMock(...)` vs `return_value`**: For patching async module-level functions, `mock.patch("path.func", new=AsyncMock(return_value=...))` replaces the function entirely. `mock.patch("path.func") as m; m.return_value = ...` also works but `new=AsyncMock(...)` is more explicit for async patching.
+
 ## 2026-06-01 — CRUD endpoints (accounts, checklist, pocs)
 
 - **Async SQLAlchemy requires eager loading everywhere**: accessing a relationship attribute on a persistent object without `selectinload` (or `joinedload`) raises `MissingGreenlet`. Always use `.options(selectinload(...))` on any query that will need relationship data in the response.
