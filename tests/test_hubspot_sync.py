@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from reffie.auth import CurrentUser, get_current_user
 from reffie.db.session import get_db_session
+from reffie.hubspot.client import HubSpotAPIError, HubSpotNotFoundError
 from reffie.main import app
 from reffie.models import Account, Poc
 
@@ -238,8 +239,6 @@ async def test_sync_updates_existing_account(mock_session: AsyncMock) -> None:
 
 
 async def test_sync_deal_not_found_returns_404(mock_session: AsyncMock) -> None:
-    from reffie.hubspot.client import HubSpotNotFoundError
-
     with mock.patch(
         "reffie.hubspot.client.get_deal_properties",
         new=AsyncMock(side_effect=HubSpotNotFoundError(f"deal {_DEAL_ID} not found")),
@@ -254,8 +253,6 @@ async def test_sync_deal_not_found_returns_404(mock_session: AsyncMock) -> None:
 
 
 async def test_sync_hubspot_api_error_returns_502(mock_session: AsyncMock) -> None:
-    from reffie.hubspot.client import HubSpotAPIError
-
     with mock.patch(
         "reffie.hubspot.client.get_deal_properties",
         new=AsyncMock(side_effect=HubSpotAPIError("HubSpot API error 500")),
