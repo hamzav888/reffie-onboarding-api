@@ -8,6 +8,14 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 - **`uv sync --locked` requires `uv.lock` committed to git**: CI runs `uv sync --locked` which verifies the lockfile matches `pyproject.toml`. If `uv.lock` is absent or gitignored, CI fails at the install step. Always commit `uv.lock`.
 
+- **Railway CLI: `npm i -g @railway/cli` is more reliable in GitHub Actions than `bash <(curl ...)`**: The curl-pipe-bash install (`cli.new`) requires a tty and fails with exit 127 in CI. `npm` is always present on `ubuntu-latest` runners.
+
+- **Railway services must be created in the project before `railway up --service <name>` can deploy to them**: First-time deploys need either an Empty Service pre-provisioned in the Railway UI with the matching service name, OR omit `--service` to let Railway create one — but that creates a new service per deploy. Always pre-provision the named service.
+
+- **The `.github/workflows/` folder must be at the git root of the repository pushed to GitHub, not a parent directory**: If the backend project lives in a subdirectory of a larger working tree, ensure the workflow file is committed inside that subdirectory (making it the git root for the GitHub repo) before the first push.
+
+- **GitHub Actions cache failures (400 on cache save/restore) are infrastructure noise**: These appear as warnings in the `setup-uv` step but do not fail the job. Ignore them unless the job itself fails.
+
 - **Railway Nixpacks does not reliably auto-detect uv**: Even though Nixpacks added uv support in 2024, detection is version-dependent. Provide an explicit `nixpacks.toml` that installs uv via the install script (`curl -LsSf https://astral.sh/uv/install.sh | sh`) and calls `uv sync --locked --no-dev`. This is belt-and-suspenders but avoids mysterious build failures on Railway.
 
 - **Run Alembic migrations as part of `startCommand`**: Include `alembic upgrade head &&` before starting uvicorn in `railway.toml`'s `startCommand`. This makes deploys self-healing — any migration committed alongside code is applied on the next deploy. If the migration fails, Railway rolls back to the previous image. Never assume the DB schema is already up to date.

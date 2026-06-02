@@ -25,13 +25,12 @@ Set these in **Railway → Service → Variables** before the first deploy:
 | Variable | Example | Notes |
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://user:pass@host:5432/db` | Supabase connection string with asyncpg driver prefix |
-| `GOOGLE_CLIENT_ID` | `12345.apps.googleusercontent.com` | OAuth client ID for JWT auth |
+| `GOOGLE_CLIENT_ID` | `12345.apps.googleusercontent.com` | OAuth client ID for Google ID token verification |
 | `HUBSPOT_TOKEN` | `pat-na1-...` | HubSpot private app token |
-| `CORS_ORIGINS` | `https://reffie-onboarding.vercel.app` | Comma-separated; include all frontend origins |
-| `HUBSPOT_WEBHOOK_SECRET` | `abc123` | HubSpot app client secret for webhook HMAC verification |
-| `HUBSPOT_CLOSED_WON_STAGE_IDS` | `closedwon,8b76c620-abc` | Comma-separated pipeline stage IDs that represent Closed Won |
-
-`JWT_SECRET` does not need to be set — Google JWT verification uses `GOOGLE_CLIENT_ID` and the Google public key endpoint.
+| `HUBSPOT_BASE_URL` | `https://api.hubapi.com` | HubSpot API base URL. Default is `https://api.hubapi.com` — only set this to override (e.g. a proxy). |
+| `CORS_ORIGINS` | `https://reffie-onboarding.vercel.app` | Comma-separated allowed origins. Default includes localhost dev URLs and the Vercel production URL. Set this in Railway to restrict to production origins only. |
+| `HUBSPOT_WEBHOOK_SECRET` | `abc123` | HubSpot app client secret for webhook HMAC-SHA256 verification. If unset, the `/hubspot/webhook` endpoint returns 503 (no crash). |
+| `HUBSPOT_CLOSED_WON_STAGE_IDS` | `closedwon,8b76c620-abc` | Comma-separated pipeline stage IDs that represent Closed Won. If unset, no accounts are auto-created from webhooks. |
 
 ## Checking deploy status
 
@@ -48,3 +47,5 @@ Set these in **Railway → Service → Variables** before the first deploy:
 **Migration failures**: The start command runs `alembic upgrade head` before uvicorn starts. If a migration fails (bad SQL, missing dependency), the deploy is rolled back and the previous version stays live. Fix the migration, push again.
 
 **Nixpacks uv detection**: `nixpacks.toml` is present to explicitly install uv via the install script. If Railway's Nixpacks version auto-detects uv, the explicit config is harmless but redundant.
+
+**GitHub Actions repo root**: The `.github/workflows/deploy.yml` file is inside this project directory. GitHub Actions only discovers workflows when `.github/` is at the root of the repository being pushed. Ensure that **this directory (`reffie-onboarding-api/`) is the root of the GitHub repository** — not a parent directory — before the first push.
