@@ -67,9 +67,9 @@ def override_deps(mock_session: AsyncMock) -> Generator[None]:
 @pytest.fixture(autouse=True)
 def mock_writeback() -> Generator[None]:
     """Suppress HubSpot write-back background tasks — tests don't need a real DB session."""
-    with mock.patch(
-        "reffie.hubspot.writeback.sync_stage_to_hubspot",
-        new=AsyncMock(),
+    with (
+        mock.patch("reffie.hubspot.writeback.sync_stage_to_hubspot", new=AsyncMock()),
+        mock.patch("reffie.hubspot.writeback.sync_tech_stack_to_hubspot", new=AsyncMock()),
     ):
         yield
 

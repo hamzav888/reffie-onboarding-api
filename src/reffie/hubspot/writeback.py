@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 
 import reffie.db.session as db_session_module
 import reffie.hubspot.client as hubspot_client
+import reffie.hubspot.tech_stack as tech_stack_module
 from reffie.config import Settings
 from reffie.constants import PLATFORM_STAGES
 from reffie.models import Account
@@ -95,4 +96,38 @@ async def sync_stage_to_hubspot(account_id: uuid.UUID, settings: Settings) -> No
             "HubSpot write-back failed for account %s / deal %s",
             account_id,
             account.hubspot_deal_id,
+        )
+
+
+async def sync_tech_stack_to_hubspot(account_id: uuid.UUID, settings: Settings) -> None:
+    """
+    Push the platform's ``tech_stack`` for this account to the associated HubSpot Company.
+
+    Opens its own database session — safe to call as a background task after the
+    request session has closed.  Failures are logged but never re-raised.
+
+    :param account_id: UUID of the account whose tech stack should be synced.
+    :param settings: Application settings providing HubSpot credentials.
+    """
+    async with db_session_module.AsyncSessionLocal() as session:
+        result = await session.execute(select(Account).where(Account.id == account_id))
+        account = result.scalar_one_or_none()
+
+    if account is None:
+        return
+
+    if account.hubspot_company_id is None:
+        return
+
+    props = tech_stack_module.ts_to_hubspot(account.tech_stack)
+    if props == {}:
+        return
+
+    try:
+        await hubspot_client.update_company_properties(account.hubspot_company_id, props, settings)
+    except (hubspot_client.HubSpotAPIError, hubspot_client.HubSpotNotFoundError):
+        logger.exception(
+            "HubSpot company write-back failed for account %s / company %s",
+            account_id,
+            account.hubspot_company_id,
         )

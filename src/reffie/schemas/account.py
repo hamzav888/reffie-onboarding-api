@@ -13,6 +13,7 @@ class AccountCreate(BaseModel):
     """Input schema for creating a new account."""
 
     hubspot_deal_id: str | None = None
+    hubspot_company_id: str | None = None
     company_name: str
     location: str
     property_type: str
@@ -30,6 +31,7 @@ class AccountUpdate(BaseModel):
     """Partial update payload — only provided fields are applied."""
 
     hubspot_deal_id: str | None = None
+    hubspot_company_id: str | None = None
     company_name: str | None = None
     location: str | None = None
     property_type: str | None = None
@@ -49,6 +51,7 @@ class AccountSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    hubspot_company_id: str | None = None
     company_name: str
     cs_rep: str
     onboarding_stage: str
@@ -63,6 +66,7 @@ class AccountDetail(BaseModel):
 
     id: uuid.UUID
     hubspot_deal_id: str | None
+    hubspot_company_id: str | None
     company_name: str
     location: str
     property_type: str

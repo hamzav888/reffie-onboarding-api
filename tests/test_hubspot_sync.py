@@ -48,6 +48,17 @@ _CONTACT_RESPONSE: dict[str, object] = {
     },
 }
 
+# HubSpot Company properties used in company-fetch tests.
+_COMPANY_PROPS: dict[str, str | None] = {
+    "pms_system": "Entrata",
+    "tour_scheduling_platform": "Showing Suite",
+    "uses_lockboxes": "false",
+    "applications_platform": "ResidentCheck",
+    "zillow_tier": "Paid",
+    "facebook_marketplace": "true",
+    "shared_leasing_email": "false",
+}
+
 
 def make_synced_account() -> Account:
     """Transient Account that looks as though it was previously synced from HubSpot."""
@@ -180,6 +191,10 @@ async def test_sync_creates_new_account(mock_session: AsyncMock) -> None:
             "reffie.hubspot.client.get_contact_properties",
             new=AsyncMock(return_value=_CONTACT_RESPONSE),
         ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(f"/hubspot/sync/{_DEAL_ID}")
@@ -226,6 +241,10 @@ async def test_sync_updates_existing_account(mock_session: AsyncMock) -> None:
         mock.patch(
             "reffie.hubspot.client.get_contact_properties",
             new=AsyncMock(return_value=_CONTACT_RESPONSE),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value=None),
         ),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -304,6 +323,10 @@ async def test_sync_contacts_mapped_to_pocs(mock_session: AsyncMock) -> None:
             "reffie.hubspot.client.get_contact_properties",
             new=AsyncMock(side_effect=[_CONTACT_RESPONSE, contact_2]),
         ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(f"/hubspot/sync/{_DEAL_ID}")
@@ -318,3 +341,141 @@ async def test_sync_contacts_mapped_to_pocs(mock_session: AsyncMock) -> None:
     # Second contact has no phone — must be None, not empty string
     john = next(p for p in pocs if p["name"] == "John Smith")
     assert john["phone"] is None
+
+
+async def test_sync_pulls_company_and_sets_tech_stack(mock_session: AsyncMock) -> None:
+    loaded = make_loaded_account()
+    # Pre-set the expected post-sync state that the DB would return.
+    loaded.hubspot_company_id = "company-1"
+    loaded.tech_stack = {
+        "pms": "Entrata",
+        "tour": "Showing Suite",
+        "lockboxes": False,
+        "applications": "ResidentCheck",
+        "zillow": "Paid",
+        "facebook": True,
+        "sharedEmail": False,
+    }
+    _setup_new_account_session(mock_session, loaded)
+
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_contact_ids",
+            new=AsyncMock(return_value=[]),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_contact_properties",
+            new=AsyncMock(),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value="company-1"),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_company_properties",
+            new=AsyncMock(return_value=_COMPANY_PROPS),
+        ),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/hubspot/sync/{_DEAL_ID}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hubspot_company_id"] == "company-1"
+    assert body["tech_stack"]["pms"] == "Entrata"
+    assert body["tech_stack"]["tour"] == "Showing Suite"
+    assert body["tech_stack"]["applications"] == "ResidentCheck"
+    assert body["tech_stack"]["zillow"] == "Paid"
+
+
+async def test_sync_no_company_defaults_tech_stack(mock_session: AsyncMock) -> None:
+    loaded = make_loaded_account()
+    # hubspot_company_id defaults to None; tech_stack defaults to {}.
+    _setup_new_account_session(mock_session, loaded)
+
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_contact_ids",
+            new=AsyncMock(return_value=[]),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_contact_properties",
+            new=AsyncMock(),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/hubspot/sync/{_DEAL_ID}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hubspot_company_id"] is None
+    assert body["tech_stack"] == {}
+
+
+async def test_sync_company_bool_fields_converted(mock_session: AsyncMock) -> None:
+    """HubSpot 'true'/'false' strings must become Python bools in tech_stack."""
+    loaded = make_loaded_account()
+    loaded.hubspot_company_id = "company-2"
+    loaded.tech_stack = {
+        "pms": "",
+        "tour": "",
+        "lockboxes": True,
+        "applications": "",
+        "zillow": "",
+        "facebook": True,
+        "sharedEmail": False,
+    }
+    _setup_new_account_session(mock_session, loaded)
+
+    bool_props: dict[str, str | None] = {
+        "pms_system": None,
+        "tour_scheduling_platform": None,
+        "uses_lockboxes": "true",
+        "applications_platform": None,
+        "zillow_tier": None,
+        "facebook_marketplace": "true",
+        "shared_leasing_email": "false",
+    }
+
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_contact_ids",
+            new=AsyncMock(return_value=[]),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_contact_properties",
+            new=AsyncMock(),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value="company-2"),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_company_properties",
+            new=AsyncMock(return_value=bool_props),
+        ),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/hubspot/sync/{_DEAL_ID}")
+
+    assert response.status_code == 200
+    ts = response.json()["tech_stack"]
+    assert ts["lockboxes"] is True
+    assert ts["facebook"] is True
+    assert ts["sharedEmail"] is False

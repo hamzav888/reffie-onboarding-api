@@ -25,6 +25,7 @@ class Account(Base):
 
     :cvar id: Primary key (UUID v4).
     :cvar hubspot_deal_id: Linked HubSpot deal, if synced.
+    :cvar hubspot_company_id: Linked HubSpot company, if synced.
     :cvar company_name: Display name of the company.
     :cvar location: Geographic location of the property.
     :cvar property_type: Category of property (e.g. multifamily, commercial).
@@ -48,6 +49,7 @@ class Account(Base):
         sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     hubspot_deal_id: Mapped[str | None] = mapped_column(sa.String, nullable=True)
+    hubspot_company_id: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     company_name: Mapped[str] = mapped_column(sa.String, nullable=False)
     location: Mapped[str] = mapped_column(sa.String, nullable=False)
     property_type: Mapped[str] = mapped_column(sa.String, nullable=False)

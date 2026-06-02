@@ -4,6 +4,12 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-02 — HubSpot Company associations
+
+- **Fetching a deal's associated company requires a separate API call**: HubSpot's deal object does not embed the company; it must be retrieved via `/crm/v4/objects/deals/{deal_id}/associations/companies`. An empty `results` array means no company is associated (not a 404). The v4 response contains `toObjectId` per associated object — take `results[0]["toObjectId"]` for the primary company. Company properties are then fetched separately via `/crm/v3/objects/companies/{company_id}?properties=...`.
+
+- **`dict` invariance requires `Mapping` for read-only function params**: When a function only reads from a dict parameter, declare it as `Mapping[K, V]` (from `collections.abc`) rather than `dict[K, V]`. `dict` is invariant — `dict[str, str]` is NOT assignable to `dict[str, str | None]` in pyright strict mode. `Mapping` is covariant in its value type, so `Mapping[str, str]` IS assignable to `Mapping[str, str | None]`.
+
 ## 2026-06-02 — Async SQLAlchemy session lifecycle
 
 - **Async SQLAlchemy + FastAPI: ALWAYS set `expire_on_commit=False` on the session factory.** Default `expire_on_commit=True` marks every attribute as expired after `session.commit()`. Any subsequent attribute access (e.g. Pydantic's `model_validate`) triggers a lazy-load that cannot run synchronously in an async context — this raises `MissingGreenlet: greenlet_spawn has not been called`. Fix: `async_sessionmaker(..., expire_on_commit=False)`. Combine with eager loading (`selectinload`) for relationships so they are populated before the session boundary.

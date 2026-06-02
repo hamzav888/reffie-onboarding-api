@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 import reffie.hubspot.client as hubspot_client
+import reffie.hubspot.tech_stack as tech_stack_module
+from reffie.config import Settings
 from reffie.constants import PLATFORM_STAGES
 from reffie.models import Account, Poc
 
@@ -131,9 +133,10 @@ def _map_contact_to_poc(contact_data: dict[str, Any], account_id: uuid.UUID) -> 
     )
 
 
-async def pull_deal(deal_id: str, db_session: AsyncSession) -> Account:
+async def pull_deal(deal_id: str, db_session: AsyncSession, settings: Settings) -> Account:
     """
-    Fetch a HubSpot deal and its contacts, then upsert them into the local database.
+    Fetch a HubSpot deal, its contacts, and its associated company, then upsert
+    them into the local database.
 
     Behaviour:
     - If an account with ``hubspot_deal_id == deal_id`` already exists, its fields
@@ -141,9 +144,14 @@ async def pull_deal(deal_id: str, db_session: AsyncSession) -> Account:
     - If no such account exists, a new one is created.
     - All existing POCs for the account are replaced with the current HubSpot contacts.
     - ``kickoff_call_date`` is populated from HubSpot but never written back.
+    - If a company is associated with the deal, ``tech_stack`` is populated from
+      the company's tech stack properties and ``hubspot_company_id`` is stored.
+    - If no company is associated, ``tech_stack`` and ``hubspot_company_id`` are
+      left untouched on existing accounts; new accounts receive empty defaults.
 
     :param deal_id: HubSpot deal object ID to sync.
     :param db_session: Active database session.
+    :param settings: Application settings providing HubSpot credentials.
     :returns: The upserted :class:`~reffie.models.account.Account` with POCs and
         checklist items eagerly loaded.
     :raises HubSpotNotFoundError: If the deal does not exist in HubSpot.
@@ -156,6 +164,13 @@ async def pull_deal(deal_id: str, db_session: AsyncSession) -> Account:
     contacts_data = [
         await hubspot_client.get_contact_properties(cid, _CONTACT_PROPERTIES) for cid in contact_ids
     ]
+
+    company_id = await hubspot_client.get_deal_company_id(deal_id, settings)
+    company_props: dict[str, str | None] | None = None
+    if company_id is not None:
+        company_props = await hubspot_client.get_company_properties(
+            company_id, hubspot_client.TECH_STACK_PROPERTIES, settings
+        )
 
     existing_result = await db_session.execute(
         select(Account).where(Account.hubspot_deal_id == deal_id)
@@ -175,6 +190,11 @@ async def pull_deal(deal_id: str, db_session: AsyncSession) -> Account:
         db_session.add(account)
 
     _apply_deal_fields_to_account(account, props, deal_id)
+
+    if company_props is not None and company_id is not None:
+        account.hubspot_company_id = company_id
+        account.tech_stack = tech_stack_module.hubspot_to_ts(company_props)
+
     await db_session.flush()
 
     await db_session.execute(delete(Poc).where(Poc.account_id == account.id))

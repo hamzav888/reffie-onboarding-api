@@ -125,13 +125,16 @@ async def patch_account(
     :raises HTTPException: 404 if the account does not exist.
     """
     account = await _load_account_detail(account_id, db_session)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    patch_data = body.model_dump(exclude_unset=True)
+    for field, value in patch_data.items():
         setattr(account, field, value)
     await db_session.flush()
     await db_session.commit()
     # Re-load so the response reflects DB-side values (e.g. onupdate updated_at).
     account = await _load_account_detail(account.id, db_session)
     background_tasks.add_task(writeback.sync_stage_to_hubspot, account.id, settings)
+    if "tech_stack" in patch_data:
+        background_tasks.add_task(writeback.sync_tech_stack_to_hubspot, account.id, settings)
     return AccountDetail.model_validate(account)
 
 
