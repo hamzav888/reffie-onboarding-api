@@ -23,6 +23,7 @@ def make_account() -> Account:
         property_type="commercial",
         cs_rep="Alice",
         onboarding_stage="kick-off",
+        tech_stack={},
         skipped_stages=[],
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -83,7 +84,10 @@ async def test_upsert_existing_item_updates_fields(mock_session: AsyncMock) -> N
     account_result.scalar_one_or_none.return_value = account
     item_result = MagicMock()
     item_result.scalar_one_or_none.return_value = item
-    mock_session.execute.side_effect = [account_result, item_result]
+    # Third execute is the re-load after commit; returns same (now-mutated) item object.
+    reload_result = MagicMock()
+    reload_result.scalar_one.return_value = item
+    mock_session.execute.side_effect = [account_result, item_result, reload_result]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.patch(
@@ -106,7 +110,17 @@ async def test_upsert_creates_item_when_missing(mock_session: AsyncMock) -> None
     account_result.scalar_one_or_none.return_value = account
     empty_result = MagicMock()
     empty_result.scalar_one_or_none.return_value = None
-    mock_session.execute.side_effect = [account_result, empty_result]
+    # Third execute is the re-load after commit; return an item matching what was written.
+    created_item = ChecklistItem(
+        id=uuid.uuid4(),
+        account_id=account.id,
+        step_id=step_id,
+        done=True,
+        note="",
+    )
+    reload_result = MagicMock()
+    reload_result.scalar_one.return_value = created_item
+    mock_session.execute.side_effect = [account_result, empty_result, reload_result]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.patch(
@@ -143,7 +157,10 @@ async def test_upsert_sets_first_touched_at(mock_session: AsyncMock) -> None:
     account_result.scalar_one_or_none.return_value = account
     item_result = MagicMock()
     item_result.scalar_one_or_none.return_value = item
-    mock_session.execute.side_effect = [account_result, item_result]
+    # Third execute is the re-load after commit; returns same (now-mutated) item object.
+    reload_result = MagicMock()
+    reload_result.scalar_one.return_value = item
+    mock_session.execute.side_effect = [account_result, item_result, reload_result]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.patch(

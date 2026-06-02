@@ -59,6 +59,7 @@ def make_synced_account() -> Account:
         property_type="commercial",
         cs_rep="Bob",
         onboarding_stage="pre-kick-off",
+        tech_stack={},
         skipped_stages=[],
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -80,6 +81,7 @@ def make_loaded_account() -> Account:
         property_type="multifamily",
         cs_rep="Alice",
         onboarding_stage="Pre-kick off",
+        tech_stack={},
         skipped_stages=[],
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -203,6 +205,7 @@ async def test_sync_updates_existing_account(mock_session: AsyncMock) -> None:
         property_type="multifamily",
         cs_rep="Alice",
         onboarding_stage="pre-kick-off",  # same as existing, not overwritten by HubSpot data
+        tech_stack={},
         skipped_stages=[],
         created_at=existing.created_at,
         updated_at=existing.updated_at,

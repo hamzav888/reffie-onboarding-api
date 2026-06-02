@@ -3,10 +3,10 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from reffie.db.base import Base
@@ -34,6 +34,7 @@ class Account(Base):
     :cvar cs_rep: Name of the assigned customer success representative.
     :cvar onboarding_stage: Current stage slug in the onboarding workflow.
     :cvar kickoff_call_date: Date the kickoff call was or will be held.
+    :cvar tech_stack: JSON object describing the customer's current technology stack.
     :cvar skipped_stages: Stage slugs intentionally skipped for this account.
     :cvar created_at: Timestamp of record creation (UTC).
     :cvar updated_at: Timestamp of last update (UTC).
@@ -56,9 +57,14 @@ class Account(Base):
     cs_rep: Mapped[str] = mapped_column(sa.String, nullable=False)
     onboarding_stage: Mapped[str] = mapped_column(sa.String, nullable=False)
     kickoff_call_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
+    tech_stack: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'{}'::jsonb"),
+    )
     skipped_stages: Mapped[list[str]] = mapped_column(
         ARRAY(sa.String),
-        server_default=sa.text("'{}'"),
+        server_default=sa.text("'{}'::varchar[]"),
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(

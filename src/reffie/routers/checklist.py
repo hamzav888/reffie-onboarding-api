@@ -68,5 +68,13 @@ async def upsert_checklist_item(
 
     await db_session.flush()
     await db_session.commit()
+    # Re-query so the response reflects any DB-side values set during the write.
+    refreshed = await db_session.execute(
+        select(ChecklistItem).where(
+            ChecklistItem.account_id == account_id,
+            ChecklistItem.step_id == step_id,
+        )
+    )
+    item = refreshed.scalar_one()
     background_tasks.add_task(writeback.sync_stage_to_hubspot, account_id, settings)
     return ChecklistItemOut.model_validate(item)

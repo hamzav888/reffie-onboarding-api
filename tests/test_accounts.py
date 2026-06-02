@@ -25,6 +25,7 @@ def make_account(**kwargs: object) -> Account:
         arr=kwargs.get("arr", Decimal("100000.00")),
         cs_rep=kwargs.get("cs_rep", "Alice"),
         onboarding_stage=kwargs.get("onboarding_stage", "kick-off"),
+        tech_stack=kwargs.get("tech_stack", {}),
         skipped_stages=kwargs.get("skipped_stages", []),
         created_at=kwargs.get("created_at", datetime.now(UTC)),
         updated_at=kwargs.get("updated_at", datetime.now(UTC)),
@@ -187,6 +188,28 @@ async def test_patch_account_updates_field(mock_session: AsyncMock) -> None:
 
     assert response.status_code == 200
     assert response.json()["onboarding_stage"] == "post-kick-off"
+
+
+async def test_patch_account_returns_fresh_updated_at(mock_session: AsyncMock) -> None:
+    # Verify that PATCH returns updated_at without triggering a lazy-load error.
+    # With expire_on_commit=False + re-load via _load_account_detail, the attribute
+    # is always populated from the in-session object (no MissingGreenlet).
+    account = make_account(onboarding_stage="Pre-kick off")
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = account
+    # Both _load_account_detail calls (before and after commit) use return_value,
+    # so they both resolve to the same mock regardless of call order.
+    mock_session.execute.return_value = mock_result
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.patch(
+            f"/accounts/{account.id}", json={"onboarding_stage": "Kick-off call"}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["updated_at"] is not None
+    assert body["onboarding_stage"] == "Kick-off call"
 
 
 async def test_patch_account_not_found(mock_session: AsyncMock) -> None:

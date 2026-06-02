@@ -4,6 +4,24 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-02 — Async SQLAlchemy session lifecycle
+
+- **Async SQLAlchemy + FastAPI: ALWAYS set `expire_on_commit=False` on the session factory.** Default `expire_on_commit=True` marks every attribute as expired after `session.commit()`. Any subsequent attribute access (e.g. Pydantic's `model_validate`) triggers a lazy-load that cannot run synchronously in an async context — this raises `MissingGreenlet: greenlet_spawn has not been called`. Fix: `async_sessionmaker(..., expire_on_commit=False)`. Combine with eager loading (`selectinload`) for relationships so they are populated before the session boundary.
+
+- **Re-load after commit to get DB-side computed values**: Even with `expire_on_commit=False`, the in-memory object retains pre-commit values for server-side columns like `updated_at` (set via `onupdate=func.now()`). After `commit()`, re-query via the existing `_load_account_detail` helper (or a fresh `select`) to reflect the actual DB state in the response. This mirrors the create-then-re-query pattern already used in `create_account`.
+
+## 2026-06-02 — CORS
+
+- **FastAPI does not handle CORS by default**: OPTIONS preflight requests return 405 unless `CORSMiddleware` is registered. Always add `CORSMiddleware` before mounting routers (middleware is applied in reverse registration order, so earlier = outer). Configure allowed origins via env var for flexibility across local/staging/production — use a `@field_validator(mode='before')` in Settings to split a comma-separated `CORS_ORIGINS` string into a `list[str]`.
+
+## 2026-06-02 — Database / migrations
+
+- **JSONB columns in SQLAlchemy 2.0**: Import `JSONB` from `sqlalchemy.dialects.postgresql` (not `sqlalchemy`). Annotate as `Mapped[dict[str, Any]]` and use `server_default=sa.text("'{}'::jsonb")` — the `::jsonb` cast is required, same as `::varchar[]` for ARRAY. In Python, `Any` must be imported from `typing` at the top level (not under `TYPE_CHECKING`) since it appears in runtime-evaluated annotations unless `from __future__ import annotations` is present.
+
+- **Alembic autogenerate picks up unrelated tables when the DB has other apps**: If the Supabase schema contains tables from other projects, autogenerate will try to drop them. Always read the generated migration and strip any `op.drop_table` / `op.drop_index` calls that don't belong to this app before running `alembic upgrade head`.
+
+- **Postgres ARRAY columns need explicit cast in server_default**: Use `sa.text("'{}'::varchar[]")` not `sa.text("'{}'")`— the latter produces malformed SQL that Postgres rejects. The explicit `::varchar[]` cast tells Postgres the type of the empty array literal unambiguously.
+
 ## 2026-06-02 — HubSpot write-back & background tasks
 
 - **Background tasks open their own DB session**: FastAPI runs background tasks after the HTTP response is sent. The request-scoped `AsyncSession` is already closed by then. Never pass the request's `db_session` to a background task — instead, open a fresh session inside the task function using `AsyncSessionLocal()`. Accepting `account_id: UUID` (not `account: Account`) forces the task to re-fetch state from a live session.

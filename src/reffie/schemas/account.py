@@ -1,8 +1,9 @@
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from reffie.schemas.checklist import ChecklistItemOut
 from reffie.schemas.poc import PocOut
@@ -22,6 +23,7 @@ class AccountCreate(BaseModel):
     onboarding_stage: str
     kickoff_call_date: date | None = None
     skipped_stages: list[str] = []
+    tech_stack: dict[str, Any] = Field(default_factory=dict)
 
 
 class AccountUpdate(BaseModel):
@@ -38,6 +40,7 @@ class AccountUpdate(BaseModel):
     onboarding_stage: str | None = None
     kickoff_call_date: date | None = None
     skipped_stages: list[str] | None = None
+    tech_stack: dict[str, Any] | None = None
 
 
 class AccountSummary(BaseModel):
@@ -50,6 +53,7 @@ class AccountSummary(BaseModel):
     cs_rep: str
     onboarding_stage: str
     skipped_stages: list[str]
+    tech_stack: dict[str, Any] = Field(default_factory=dict)
 
 
 class AccountDetail(BaseModel):
@@ -69,6 +73,7 @@ class AccountDetail(BaseModel):
     onboarding_stage: str
     kickoff_call_date: date | None
     skipped_stages: list[str]
+    tech_stack: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
     pocs: list[PocOut]

@@ -28,6 +28,7 @@ def _make_account(
         property_type="multifamily",
         cs_rep="Alice",
         onboarding_stage=onboarding_stage,
+        tech_stack={},
         skipped_stages=[],
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),

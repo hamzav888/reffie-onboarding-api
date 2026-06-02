@@ -49,6 +49,19 @@ SEED_ACCOUNTS: list[dict[str, Any]] = [
 
 _CS_REP = "Angelina LaPerla"
 
+DEFAULT_TS: dict[str, Any] = {
+    "pms": "",
+    "tour": "None",
+    "lockboxes": False,
+    "applications": "None",
+    "zillow": "None",
+    "facebook": False,
+    "sharedEmail": False,
+    "sharedEmailAddr": "",
+    "sharedEmailAddrs": [],
+    "other": "",
+}
+
 
 async def main() -> None:
     """
@@ -83,6 +96,7 @@ async def main() -> None:
                     success_metrics=data["success_metrics"],
                     onboarding_stage=data["onboarding_stage"],
                     cs_rep=_CS_REP,
+                    tech_stack=DEFAULT_TS,
                     skipped_stages=[],
                 )
             )

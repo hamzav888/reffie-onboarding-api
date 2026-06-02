@@ -22,6 +22,7 @@ def make_account() -> Account:
         property_type="commercial",
         cs_rep="Alice",
         onboarding_stage="kick-off",
+        tech_stack={},
         skipped_stages=[],
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),

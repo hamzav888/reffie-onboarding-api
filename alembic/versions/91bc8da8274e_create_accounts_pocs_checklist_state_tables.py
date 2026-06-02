@@ -35,7 +35,7 @@ def upgrade() -> None:
         sa.Column(
             "skipped_stages",
             postgresql.ARRAY(sa.String()),
-            server_default="'{}'",
+            server_default=sa.text("'{}'::varchar[]"),
             nullable=False,
         ),
         sa.Column(
