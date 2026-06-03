@@ -1,14 +1,16 @@
 """
 HubSpot webhook receiver.
 
-Authentication uses HMAC-SHA256 rather than the platform's Google JWT —
-HubSpot signs requests itself.  The route must return 200 quickly; all side
-effects are dispatched as background tasks.
+Authentication supports all three HubSpot signature versions (V1, V2, V3) and
+dispatches by which headers are present. The route returns 200 immediately;
+all side effects run as background tasks.
 """
 
+import base64
 import hashlib
-import hmac as hmac_stdlib
+import hmac
 import json
+import time
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -20,23 +22,55 @@ from reffie.schemas.hubspot_webhook import HubSpotWebhookEvent
 router = APIRouter(prefix="/hubspot", tags=["hubspot"])
 
 
-def _verify_signature(secret: str, method: str, uri: str, raw_body: bytes, header_sig: str) -> bool:
-    """
-    Verify a HubSpot V3 webhook signature.
+async def _verify_hubspot_signature(request: Request, settings: Settings) -> None:
+    """Verify a HubSpot webhook signature. Supports V1, V2, and V3.
 
-    HubSpot computes SHA-256 over ``client_secret + method + uri + body`` and
-    sends the hex digest in ``X-HubSpot-Signature-V3``.
+    Dispatches by which headers are present. V3 is preferred when available
+    (includes replay protection).
 
-    :param secret: The configured ``HUBSPOT_WEBHOOK_SECRET``.
-    :param method: HTTP method from the incoming request (e.g. ``"POST"``).
-    :param uri: Full request URI as a string.
-    :param raw_body: Raw request body bytes.
-    :param header_sig: Hex-encoded signature from the request header.
-    :returns: ``True`` if signatures match, ``False`` otherwise.
+    :param request: The incoming FastAPI request.
+    :param settings: Application settings (must contain hubspot_webhook_secret).
+    :raises HTTPException: 503 if secret is unconfigured; 401 on any signature failure.
     """
-    payload = (secret + method + uri + raw_body.decode()).encode()
-    expected = hashlib.sha256(payload).hexdigest()
-    return hmac_stdlib.compare_digest(expected, header_sig)
+    secret = settings.hubspot_webhook_secret
+    if not secret:
+        raise HTTPException(status_code=503, detail="Webhook secret not configured")
+
+    raw_body = await request.body()
+    body_text = raw_body.decode("utf-8")
+    method = request.method.upper()
+    uri = str(request.url)
+
+    sig_v3 = request.headers.get("X-HubSpot-Signature-V3")
+    timestamp_header = request.headers.get("X-HubSpot-Request-Timestamp")
+    if sig_v3 and timestamp_header:
+        try:
+            ts_ms = int(timestamp_header)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail="Invalid timestamp") from exc
+        if abs(time.time() * 1000 - ts_ms) > 5 * 60 * 1000:
+            raise HTTPException(status_code=401, detail="Webhook timestamp too old")
+        message = f"{method}{uri}{body_text}{timestamp_header}".encode()
+        computed = base64.b64encode(
+            hmac.new(secret.encode("utf-8"), message, hashlib.sha256).digest()
+        ).decode("utf-8")
+        if not hmac.compare_digest(computed, sig_v3):
+            raise HTTPException(status_code=401, detail="Invalid V3 signature")
+        return
+
+    sig_legacy = request.headers.get("X-HubSpot-Signature")
+    version_header = request.headers.get("X-HubSpot-Signature-Version", "v1")
+    if sig_legacy:
+        if version_header == "v2":
+            message_str = f"{secret}{method}{uri}{body_text}"
+        else:
+            message_str = f"{secret}{body_text}"
+        computed_hex = hashlib.sha256(message_str.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(computed_hex, sig_legacy):
+            raise HTTPException(status_code=401, detail=f"Invalid {version_header} signature")
+        return
+
+    raise HTTPException(status_code=401, detail="Missing signature header")
 
 
 @router.post("/webhook")
@@ -48,7 +82,7 @@ async def hubspot_webhook(
     """
     Receive HubSpot webhook events and dispatch background processing tasks.
 
-    Verifies the HMAC-SHA256 signature before processing. Returns 200
+    Verifies the HubSpot signature (V1/V2/V3) before processing. Returns 200
     immediately after scheduling side effects — HubSpot requires a fast
     response and retries on timeouts.
 
@@ -57,23 +91,11 @@ async def hubspot_webhook(
     :param settings: Application settings providing webhook credentials.
     :returns: ``{"status": "ok"}`` on success.
     :raises HTTPException: 503 if the webhook secret is not configured.
-    :raises HTTPException: 401 if the HMAC signature is missing or invalid.
+    :raises HTTPException: 401 if the signature is missing or invalid.
     """
-    if not settings.hubspot_webhook_secret:
-        raise HTTPException(status_code=503, detail="Webhook not configured")
+    await _verify_hubspot_signature(request, settings)
 
     raw_body = await request.body()
-    sig = request.headers.get("x-hubspot-signature-v3", "")
-
-    if not sig or not _verify_signature(
-        settings.hubspot_webhook_secret,
-        request.method,
-        str(request.url),
-        raw_body,
-        sig,
-    ):
-        raise HTTPException(status_code=401, detail="Invalid signature")
-
     events_raw: list[Any] = json.loads(raw_body)
     events = [HubSpotWebhookEvent.model_validate(e) for e in events_raw]
 

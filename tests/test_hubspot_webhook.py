@@ -3,8 +3,11 @@ Tests for the HubSpot webhook receiver (HTTP endpoint) and the
 process_closed_won background task.
 """
 
+import base64
 import hashlib
+import hmac
 import json
+import time
 import uuid
 from datetime import UTC, datetime
 from unittest import mock
@@ -12,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from httpx import ASGITransport, AsyncClient
 
+from reffie.config import get_settings
 from reffie.config import settings as _settings
 from reffie.hubspot.auto_create import process_closed_won
 from reffie.hubspot.client import HubSpotAPIError
@@ -19,7 +23,7 @@ from reffie.main import app
 from reffie.models import Account
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Constants
 # ---------------------------------------------------------------------------
 
 _WEBHOOK_SECRET = "test-webhook-secret"  # noqa: S105
@@ -27,11 +31,56 @@ _DEAL_ID = "deal-9001"
 _CLOSED_WON_STAGE = "closedwon"
 _WEBHOOK_URL = "http://test/hubspot/webhook"
 
+# ---------------------------------------------------------------------------
+# Signature helpers
+# ---------------------------------------------------------------------------
 
-def _sign(method: str, url: str, body: str) -> str:
-    """Compute the expected HMAC-SHA256 signature for a test request."""
-    payload = (_WEBHOOK_SECRET + method + url + body).encode()
-    return hashlib.sha256(payload).hexdigest()
+
+def _compute_v1_signature(secret: str, body: str) -> str:
+    return hashlib.sha256(f"{secret}{body}".encode()).hexdigest()
+
+
+def _compute_v2_signature(secret: str, method: str, uri: str, body: str) -> str:
+    return hashlib.sha256(f"{secret}{method}{uri}{body}".encode()).hexdigest()
+
+
+def _compute_v3_signature(secret: str, method: str, uri: str, body: str, timestamp: str) -> str:
+    message = f"{method}{uri}{body}{timestamp}".encode()
+    return base64.b64encode(
+        hmac.new(secret.encode("utf-8"), message, hashlib.sha256).digest()
+    ).decode("utf-8")
+
+
+def _v1_headers(body: str) -> dict[str, str]:
+    return {
+        "content-type": "application/json",
+        "x-hubspot-signature": _compute_v1_signature(_WEBHOOK_SECRET, body),
+    }
+
+
+def _v2_headers(body: str) -> dict[str, str]:
+    return {
+        "content-type": "application/json",
+        "x-hubspot-signature": _compute_v2_signature(_WEBHOOK_SECRET, "POST", _WEBHOOK_URL, body),
+        "x-hubspot-signature-version": "v2",
+    }
+
+
+def _v3_headers(body: str, ts_ms: int | None = None) -> dict[str, str]:
+    if ts_ms is None:
+        ts_ms = int(time.time() * 1000)
+    ts_str = str(ts_ms)
+    sig = _compute_v3_signature(_WEBHOOK_SECRET, "POST", _WEBHOOK_URL, body, ts_str)
+    return {
+        "content-type": "application/json",
+        "x-hubspot-signature-v3": sig,
+        "x-hubspot-request-timestamp": ts_str,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Shared test data helpers
+# ---------------------------------------------------------------------------
 
 
 def _make_event(
@@ -69,7 +118,6 @@ def _make_account(deal_id: str = _DEAL_ID) -> Account:
 
 
 def _patch_db(account: Account | None) -> mock._patch:  # type: ignore[type-arg]
-    """Patch AsyncSessionLocal to yield a session with a single execute result."""
     mock_session = AsyncMock()
     mock_session.add = MagicMock()
     mock_session.flush = AsyncMock()
@@ -83,22 +131,11 @@ def _patch_db(account: Account | None) -> mock._patch:  # type: ignore[type-arg]
 
 
 # ---------------------------------------------------------------------------
-# Webhook endpoint tests
+# Signature verification tests
 # ---------------------------------------------------------------------------
 
 
-async def test_webhook_invalid_signature_returns_401() -> None:
-    body = json.dumps([_make_event()])
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post(
-            "/hubspot/webhook",
-            content=body,
-            headers={"content-type": "application/json", "x-hubspot-signature-v3": "bad-sig"},
-        )
-    assert response.status_code == 401
-
-
-async def test_webhook_missing_signature_returns_401() -> None:
+async def test_webhook_no_signature_header() -> None:
     body = json.dumps([_make_event()])
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
@@ -109,16 +146,131 @@ async def test_webhook_missing_signature_returns_401() -> None:
     assert response.status_code == 401
 
 
-async def test_webhook_irrelevant_event_no_task_scheduled() -> None:
-    body = json.dumps([_make_event(subscription_type="contact.creation")])
-    sig = _sign("POST", _WEBHOOK_URL, body)
+async def test_webhook_secret_not_configured() -> None:
+    body = json.dumps([_make_event()])
+    no_secret = _settings.model_copy(update={"hubspot_webhook_secret": ""})
+    app.dependency_overrides[get_settings] = lambda: no_secret
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers={"content-type": "application/json"},
+            )
+        assert response.status_code == 503
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+
+async def test_webhook_invalid_v3_signature() -> None:
+    body = json.dumps([_make_event()])
+    ts_str = str(int(time.time() * 1000))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/hubspot/webhook",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "x-hubspot-signature-v3": "not-a-valid-sig",
+                "x-hubspot-request-timestamp": ts_str,
+            },
+        )
+    assert response.status_code == 401
+
+
+async def test_webhook_invalid_v2_signature() -> None:
+    body = json.dumps([_make_event()])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/hubspot/webhook",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "x-hubspot-signature": "not-a-valid-sig",
+                "x-hubspot-signature-version": "v2",
+            },
+        )
+    assert response.status_code == 401
+
+
+async def test_webhook_v3_replay_protection() -> None:
+    # Timestamp 6 minutes in the past — outside the 5-minute window.
+    body = json.dumps([_make_event()])
+    old_ts_ms = int((time.time() - 361) * 1000)
+    ts_str = str(old_ts_ms)
+    sig = _compute_v3_signature(_WEBHOOK_SECRET, "POST", _WEBHOOK_URL, body, ts_str)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/hubspot/webhook",
+            content=body,
+            headers={
+                "content-type": "application/json",
+                "x-hubspot-signature-v3": sig,
+                "x-hubspot-request-timestamp": ts_str,
+            },
+        )
+    assert response.status_code == 401
+
+
+async def test_webhook_v1_signature_valid() -> None:
+    body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
     mock_process = AsyncMock()
     with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/hubspot/webhook",
                 content=body,
-                headers={"content-type": "application/json", "x-hubspot-signature-v3": sig},
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    mock_process.assert_called_once()
+
+
+async def test_webhook_v2_signature_valid() -> None:
+    body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
+    mock_process = AsyncMock()
+    with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v2_headers(body),
+            )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    mock_process.assert_called_once()
+
+
+async def test_webhook_v3_signature_valid() -> None:
+    body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
+    mock_process = AsyncMock()
+    with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v3_headers(body),
+            )
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    mock_process.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Event filtering tests
+# ---------------------------------------------------------------------------
+
+
+async def test_webhook_irrelevant_event_no_task_scheduled() -> None:
+    body = json.dumps([_make_event(subscription_type="contact.creation")])
+    mock_process = AsyncMock()
+    with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
             )
     assert response.status_code == 200
     mock_process.assert_not_called()
@@ -126,14 +278,13 @@ async def test_webhook_irrelevant_event_no_task_scheduled() -> None:
 
 async def test_webhook_non_closed_won_stage_no_task_scheduled() -> None:
     body = json.dumps([_make_event(property_value="appointmentscheduled")])
-    sig = _sign("POST", _WEBHOOK_URL, body)
     mock_process = AsyncMock()
     with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/hubspot/webhook",
                 content=body,
-                headers={"content-type": "application/json", "x-hubspot-signature-v3": sig},
+                headers=_v1_headers(body),
             )
     assert response.status_code == 200
     mock_process.assert_not_called()
@@ -141,14 +292,13 @@ async def test_webhook_non_closed_won_stage_no_task_scheduled() -> None:
 
 async def test_webhook_closed_won_schedules_task() -> None:
     body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
-    sig = _sign("POST", _WEBHOOK_URL, body)
     mock_process = AsyncMock()
     with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/hubspot/webhook",
                 content=body,
-                headers={"content-type": "application/json", "x-hubspot-signature-v3": sig},
+                headers=_v1_headers(body),
             )
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -299,4 +449,4 @@ async def test_process_hubspot_error_does_not_raise() -> None:
         ),
     ):
         await process_closed_won(_DEAL_ID, _settings)
-    # If we reach here without raising, the test passes.
+    # Reaching here without raising confirms background tasks swallow HubSpot errors.

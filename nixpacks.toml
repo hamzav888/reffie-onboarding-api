@@ -12,4 +12,4 @@ cmds = [
 cmds = ['echo "no build phase needed"']
 
 [start]
-cmd = '$HOME/.local/bin/uv run alembic upgrade head && $HOME/.local/bin/uv run uvicorn reffie.main:app --host 0.0.0.0 --port $PORT'
+cmd = '$HOME/.local/bin/uv run alembic upgrade head && $HOME/.local/bin/uv run uvicorn reffie.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips=\'*\''

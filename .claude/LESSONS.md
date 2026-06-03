@@ -4,6 +4,19 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-03 — HubSpot webhook signature versions
+
+- **HubSpot supports three signature versions — always handle all three on the same endpoint:**
+  - V1: `SHA-256(client_secret + request_body)`, hex-encoded, header `X-HubSpot-Signature`
+  - V2: `SHA-256(client_secret + method + uri + request_body)`, hex-encoded, header `X-HubSpot-Signature` + `X-HubSpot-Signature-Version: v2`
+  - V3: `base64(HMAC-SHA256(key=client_secret, msg=method + uri + body + timestamp))`, header `X-HubSpot-Signature-V3` + `X-HubSpot-Request-Timestamp` (5-minute replay window)
+  - Dispatch by which headers are present: V3 if both `X-HubSpot-Signature-V3` and `X-HubSpot-Request-Timestamp` present, else V1/V2 via `X-HubSpot-Signature`.
+  - Legacy private apps typically send V1 or V2. OAuth apps send V3.
+
+- **Behind a reverse proxy (Railway), start uvicorn with `--proxy-headers --forwarded-allow-ips='*'`**: Without this, `str(request.url)` returns `http://` instead of `https://`, breaking V3 signature verification because the URI in the computed hash won't match what HubSpot signed.
+
+---
+
 ## 2026-06-02 — GitHub Actions + Railway deployment
 
 - **`uv sync --locked` requires `uv.lock` committed to git**: CI runs `uv sync --locked` which verifies the lockfile matches `pyproject.toml`. If `uv.lock` is absent or gitignored, CI fails at the install step. Always commit `uv.lock`.
