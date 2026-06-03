@@ -126,3 +126,21 @@ async def webhook_debug(request: Request) -> dict[str, str]:
         "host_header": request.headers.get("host", ""),
         "scheme": request.url.scheme,
     }
+
+
+@router.get("/secret-debug")
+async def secret_debug(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str | int | bool]:
+    """Temporary diagnostic. Returns length, first/last char, and whitespace flags.
+
+    Does NOT return the secret itself. Remove after debugging.
+    """
+    s = settings.hubspot_webhook_secret
+    return {
+        "length": len(s),
+        "first_char_code": ord(s[0]) if s else -1,
+        "last_char_code": ord(s[-1]) if s else -1,
+        "starts_with_whitespace": s.startswith((" ", "\t", "\n", "\r")) if s else False,
+        "ends_with_whitespace": s.endswith((" ", "\t", "\n", "\r")) if s else False,
+    }
