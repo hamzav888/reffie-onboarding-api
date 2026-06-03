@@ -424,6 +424,43 @@ async def test_sync_no_company_defaults_tech_stack(mock_session: AsyncMock) -> N
     assert body["tech_stack"] == {}
 
 
+async def test_sync_skips_deleted_contact(mock_session: AsyncMock) -> None:
+    """A 404 on one contact should be skipped; the rest of the sync should complete."""
+    loaded = make_loaded_account()  # has 1 POC (Jane Doe, contact-1)
+    _setup_new_account_session(mock_session, loaded)
+
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_contact_ids",
+            new=AsyncMock(return_value=["contact-deleted", "contact-1"]),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_contact_properties",
+            new=AsyncMock(
+                side_effect=[
+                    HubSpotNotFoundError("contact contact-deleted not found"),
+                    _CONTACT_RESPONSE,
+                ]
+            ),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/hubspot/sync/{_DEAL_ID}")
+
+    assert response.status_code == 200
+    pocs = response.json()["pocs"]
+    assert len(pocs) == 1
+    assert pocs[0]["name"] == "Jane Doe"
+
+
 async def test_sync_company_bool_fields_converted(mock_session: AsyncMock) -> None:
     """HubSpot 'true'/'false' strings must become Python bools in tech_stack."""
     loaded = make_loaded_account()

@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -12,6 +13,8 @@ import reffie.hubspot.tech_stack as tech_stack_module
 from reffie.config import Settings
 from reffie.constants import PLATFORM_STAGES
 from reffie.models import Account, Poc
+
+logger = logging.getLogger(__name__)
 
 _DEAL_PROPERTIES: list[str] = [
     "dealname",
@@ -161,9 +164,18 @@ async def pull_deal(deal_id: str, db_session: AsyncSession, settings: Settings) 
     props: dict[str, Any] = deal_data.get("properties", {})
 
     contact_ids = await hubspot_client.get_deal_contact_ids(deal_id)
-    contacts_data = [
-        await hubspot_client.get_contact_properties(cid, _CONTACT_PROPERTIES) for cid in contact_ids
-    ]
+    contacts_data: list[dict[str, Any]] = []
+    for cid in contact_ids:
+        try:
+            contact = await hubspot_client.get_contact_properties(cid, _CONTACT_PROPERTIES)
+            contacts_data.append(contact)
+        except hubspot_client.HubSpotNotFoundError:
+            logger.warning(
+                "Skipping deleted contact %s for deal %s — contact no longer exists in HubSpot",
+                cid,
+                deal_id,
+            )
+            continue
 
     company_id = await hubspot_client.get_deal_company_id(deal_id, settings)
     company_props: dict[str, str | None] | None = None

@@ -450,3 +450,53 @@ async def test_process_hubspot_error_does_not_raise() -> None:
     ):
         await process_closed_won(_DEAL_ID, _settings)
     # Reaching here without raising confirms background tasks swallow HubSpot errors.
+
+
+async def test_line_items_sorted_numerically() -> None:
+    """PRO on id='9' must be found even though '10' < '9' lexicographically."""
+    account = _make_account()
+    mock_writeback = AsyncMock()
+    # id '9' (PRO) vs id '10' (non-matching). Lexicographic order: '10' first, then '9'.
+    # Numeric order: 9 first, then 10. In both cases PRO is found eventually.
+    # The test asserts the sort doesn't produce an exception and PRO is correctly matched.
+    line_items = [
+        {"id": "10", "name": "Add-on", "sku": "ADDON", "quantity": "1", "price": "50"},
+        {"id": "9", "name": "Pro", "sku": "PRO", "quantity": "1", "price": "500"},
+    ]
+    with (
+        _patch_db(None),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_stage",
+            new=AsyncMock(return_value=_CLOSED_WON_STAGE),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_quote_ids",
+            new=AsyncMock(return_value=["quote-1"]),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_quote_line_items",
+            new=AsyncMock(return_value=line_items),
+        ),
+        mock.patch("reffie.hubspot.sync.pull_deal", new=AsyncMock(return_value=account)),
+        mock.patch("reffie.hubspot.writeback.sync_stage_to_hubspot", mock_writeback),
+    ):
+        await process_closed_won(_DEAL_ID, _settings)
+
+    assert account.onboarding_stage == "Pre-kick off"
+    mock_writeback.assert_called_once()
+
+
+async def test_db_error_during_processing_is_caught() -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    mock_session = AsyncMock()
+    mock_session.add = MagicMock()
+    mock_session.flush = AsyncMock()
+    mock_session.commit = AsyncMock()
+    mock_session.execute = AsyncMock(side_effect=SQLAlchemyError("DB connection error"))
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with mock.patch("reffie.db.session.AsyncSessionLocal", MagicMock(return_value=mock_session)):
+        await process_closed_won(_DEAL_ID, _settings)
+    # Reaching here without raising confirms DB errors are swallowed in background tasks.

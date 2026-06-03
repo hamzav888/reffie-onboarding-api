@@ -4,6 +4,16 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-03 — Auto-account-creation robustness
+
+- **Numeric IDs serialised as strings sort lexicographically by default** (`'10' < '9'`). When sorting on string-typed numeric IDs, parse to int with a string fallback: `try (0, int(raw)) except (1, str(raw))`. This gives numeric ordering for normal HubSpot IDs and a stable fallback for any non-numeric edge cases.
+
+- **HubSpot deal-to-contact associations can include deleted contacts**; fetching a deleted contact returns 404. Always wrap per-contact fetches in `try/except HubSpotNotFoundError` and skip with a `logger.warning` — don't let one missing contact abort an entire deal sync. Use a for-loop with `continue`, not a list comprehension.
+
+- **In background tasks that touch the DB, wrap the entire function body in `try/except` for both `SQLAlchemyError` and `HubSpotAPIError/HubSpotNotFoundError`**. The inner per-call catches handle recoverable errors (letting processing continue for other quotes/contacts). The outer catch is a safety net for anything that slips through. Never catch bare `Exception` — let other bugs surface visibly in logs.
+
+---
+
 ## 2026-06-03 — Railway/Nixpacks TOML startCommand quoting
 
 - **Do NOT use shell-style nested quotes inside TOML startCommand strings.** Railway and Nixpacks parse these strings as TOML before passing them to a shell. `--forwarded-allow-ips='*'` inside a TOML double-quoted string is passed to uvicorn with the literal quote characters, causing uvicorn to receive `'*'` (with apostrophes) rather than `*`. Worse, `--forwarded-allow-ips=\'*\'` inside a TOML single-quoted (literal) string is **invalid TOML** — literal strings cannot contain single quotes, and backslash is not an escape character in them; the string terminates at the first `'`, breaking the parse entirely. Use bare unquoted values: `--forwarded-allow-ips=*`. When `=` joins the flag and value as a single token, no shell glob expansion occurs.
