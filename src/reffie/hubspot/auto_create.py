@@ -50,6 +50,7 @@ async def process_closed_won(deal_id: str, settings: Settings) -> None:
     :param deal_id: HubSpot deal object ID from the webhook event.
     :param settings: Application settings providing HubSpot credentials.
     """
+    logger.warning("process_closed_won ENTRY deal_id=%s", deal_id)
     async with db_session_module.AsyncSessionLocal() as session:
         try:
             # Idempotency guard — webhook may fire multiple times.
@@ -57,7 +58,7 @@ async def process_closed_won(deal_id: str, settings: Settings) -> None:
                 select(Account).where(Account.hubspot_deal_id == deal_id)
             )
             if result.scalar_one_or_none() is not None:
-                logger.info("Account for deal %s already exists, skipping", deal_id)
+                logger.warning("Account for deal %s already exists, skipping", deal_id)
                 return
 
             # Re-verify the stage at processing time — the webhook can be delayed.
@@ -68,7 +69,9 @@ async def process_closed_won(deal_id: str, settings: Settings) -> None:
                 return
 
             if stage is None or stage not in settings.hubspot_closed_won_stage_ids:
-                logger.info("Deal %s is no longer Closed Won (stage=%s), skipping", deal_id, stage)
+                logger.warning(
+                    "Deal %s is no longer Closed Won (stage=%s), skipping", deal_id, stage
+                )
                 return
 
             # Fetch quotes attached to this deal.
@@ -79,7 +82,7 @@ async def process_closed_won(deal_id: str, settings: Settings) -> None:
                 return
 
             if quote_ids == []:
-                logger.info("Deal %s has no quotes, skipping account creation", deal_id)
+                logger.warning("Deal %s has no quotes, skipping account creation", deal_id)
                 return
 
             # Collect all line items from all quotes.
@@ -103,7 +106,9 @@ async def process_closed_won(deal_id: str, settings: Settings) -> None:
                     break
 
             if flow is None:
-                logger.info("Deal %s: no matching product SKU, skipping account creation", deal_id)
+                logger.warning(
+                    "Deal %s: no matching product SKU, skipping account creation", deal_id
+                )
                 return
 
             # Create the account by re-using the existing sync pipeline.
@@ -127,7 +132,7 @@ async def process_closed_won(deal_id: str, settings: Settings) -> None:
 
     # sync_stage_to_hubspot opens its own session — call outside our session block.
     await writeback_module.sync_stage_to_hubspot(account.id, settings)
-    logger.info(
+    logger.warning(
         "Created account %s from HubSpot deal %s (product=%s)",
         account.id,
         deal_id,

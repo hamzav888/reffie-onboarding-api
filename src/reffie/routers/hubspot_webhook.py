@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
 from typing import Any
 
@@ -18,6 +19,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 import reffie.hubspot.auto_create as auto_create_module
 from reffie.config import Settings, get_settings
 from reffie.schemas.hubspot_webhook import HubSpotWebhookEvent
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/hubspot", tags=["hubspot"])
 
@@ -99,7 +102,18 @@ async def hubspot_webhook(
     events_raw: list[Any] = json.loads(raw_body)
     events = [HubSpotWebhookEvent.model_validate(e) for e in events_raw]
 
+    logger.warning(
+        "Webhook events count=%d closed_won_ids=%s",
+        len(events),
+        settings.hubspot_closed_won_stage_ids,
+    )
     for event in events:
+        logger.warning(
+            "event subscription=%s property=%s value=%s",
+            event.subscription_type,
+            event.property_name,
+            event.property_value,
+        )
         if (
             event.subscription_type == "deal.propertyChange"
             and event.property_name == "dealstage"
