@@ -4,6 +4,12 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-03 — Railway/Nixpacks TOML startCommand quoting
+
+- **Do NOT use shell-style nested quotes inside TOML startCommand strings.** Railway and Nixpacks parse these strings as TOML before passing them to a shell. `--forwarded-allow-ips='*'` inside a TOML double-quoted string is passed to uvicorn with the literal quote characters, causing uvicorn to receive `'*'` (with apostrophes) rather than `*`. Worse, `--forwarded-allow-ips=\'*\'` inside a TOML single-quoted (literal) string is **invalid TOML** — literal strings cannot contain single quotes, and backslash is not an escape character in them; the string terminates at the first `'`, breaking the parse entirely. Use bare unquoted values: `--forwarded-allow-ips=*`. When `=` joins the flag and value as a single token, no shell glob expansion occurs.
+
+---
+
 ## 2026-06-03 — HubSpot webhook signature versions
 
 - **HubSpot supports three signature versions — always handle all three on the same endpoint:**
