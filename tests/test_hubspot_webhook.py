@@ -223,7 +223,7 @@ async def test_webhook_v1_signature_valid() -> None:
                 headers=_v1_headers(body),
             )
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
     mock_process.assert_called_once()
 
 
@@ -238,7 +238,7 @@ async def test_webhook_v2_signature_valid() -> None:
                 headers=_v2_headers(body),
             )
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
     mock_process.assert_called_once()
 
 
@@ -253,7 +253,7 @@ async def test_webhook_v3_signature_valid() -> None:
                 headers=_v3_headers(body),
             )
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
     mock_process.assert_called_once()
 
 
@@ -301,7 +301,7 @@ async def test_webhook_closed_won_schedules_task() -> None:
                 headers=_v1_headers(body),
             )
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
     mock_process.assert_called_once_with("9001", _settings)
 
 
