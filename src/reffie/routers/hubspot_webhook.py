@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 import reffie.hubspot.auto_create as auto_create_module
 from reffie.config import Settings, get_settings
@@ -79,20 +79,20 @@ async def _verify_hubspot_signature(request: Request, settings: Settings) -> Non
 @router.post("/webhook")
 async def hubspot_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     settings: Settings = Depends(get_settings),
-) -> dict[str, str | list[str]]:
+) -> dict[str, str]:
     """
-    Receive HubSpot webhook events and run processing synchronously.
+    Receive HubSpot webhook events and dispatch background processing tasks.
 
-    Diagnostic mode: awaits ``process_closed_won`` inline and captures all log
-    output into the response body so the execution path is visible without
-    Railway access.  Reverts to background-task dispatch once the investigation
-    is complete.
+    Verifies the HubSpot signature (V1/V2/V3) before processing. Returns 200
+    immediately after scheduling side effects — HubSpot requires a fast
+    response and retries on timeouts.
 
     :param request: Raw FastAPI request (needed for body bytes and headers).
+    :param background_tasks: FastAPI background task queue.
     :param settings: Application settings providing webhook credentials.
-    :returns: ``{"status": "ok", "logs": [...]}`` — logs contains every captured
-        log line from this request's processing.
+    :returns: ``{"status": "ok"}`` on success.
     :raises HTTPException: 503 if the webhook secret is not configured.
     :raises HTTPException: 401 if the signature is missing or invalid.
     """
@@ -102,50 +102,35 @@ async def hubspot_webhook(
     events_raw: list[Any] = json.loads(raw_body)
     events = [HubSpotWebhookEvent.model_validate(e) for e in events_raw]
 
-    captured: list[str] = []
-
-    class _ListHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            captured.append(self.format(record))
-
-    handler = _ListHandler()
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
-
-    root = logging.getLogger()
-    original_level = root.level
-    root.setLevel(logging.DEBUG)
-    root.addHandler(handler)
-
-    try:
+    logger.warning(
+        "Webhook events count=%d closed_won_ids=%s",
+        len(events),
+        settings.hubspot_closed_won_stage_ids,
+    )
+    for event in events:
         logger.warning(
-            "Webhook events count=%d closed_won_ids=%s",
-            len(events),
-            settings.hubspot_closed_won_stage_ids,
+            "event subscription=%s property=%s value=%s",
+            event.subscription_type,
+            event.property_name,
+            event.property_value,
         )
-        for event in events:
+        if (
+            event.subscription_type == "deal.propertyChange"
+            and event.property_name == "dealstage"
+            and event.property_value in settings.hubspot_closed_won_stage_ids
+        ):
+            background_tasks.add_task(
+                auto_create_module.process_closed_won,
+                str(event.object_id),
+                settings,
+            )
+        else:
             logger.warning(
-                "event subscription=%s property=%s value=%s",
+                "event skipped subscription=%s property=%s value=%s closed_won_ids=%s",
                 event.subscription_type,
                 event.property_name,
                 event.property_value,
+                settings.hubspot_closed_won_stage_ids,
             )
-            if (
-                event.subscription_type == "deal.propertyChange"
-                and event.property_name == "dealstage"
-                and event.property_value in settings.hubspot_closed_won_stage_ids
-            ):
-                await auto_create_module.process_closed_won(str(event.object_id), settings)
-            else:
-                logger.warning(
-                    "event skipped subscription=%s property=%s value=%s closed_won_ids=%s",
-                    event.subscription_type,
-                    event.property_name,
-                    event.property_value,
-                    settings.hubspot_closed_won_stage_ids,
-                )
-    finally:
-        root.removeHandler(handler)
-        root.setLevel(original_level)
 
-    return {"status": "ok", "logs": captured}
+    return {"status": "ok"}
