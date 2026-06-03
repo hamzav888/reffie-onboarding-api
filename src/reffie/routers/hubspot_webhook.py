@@ -144,3 +144,35 @@ async def secret_debug(
         "starts_with_whitespace": s.startswith((" ", "\t", "\n", "\r")) if s else False,
         "ends_with_whitespace": s.endswith((" ", "\t", "\n", "\r")) if s else False,
     }
+
+
+@router.post("/signature-debug")
+async def signature_debug(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str | int]:
+    """Temporary diagnostic. Computes what the backend would compute for V3 signature.
+
+    Returns intermediate values so the caller can compare against their own computation.
+    Remove after debugging.
+    """
+    raw_body = await request.body()
+    body_text = raw_body.decode("utf-8")
+    method = request.method.upper()
+    uri = str(request.url)
+    timestamp = request.headers.get("X-HubSpot-Request-Timestamp", "")
+    message = f"{method}{uri}{body_text}{timestamp}"
+
+    secret = settings.hubspot_webhook_secret
+    computed = base64.b64encode(
+        hmac.new(secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).digest()
+    ).decode("utf-8")
+
+    return {
+        "method": method,
+        "uri": uri,
+        "body_text": body_text,
+        "timestamp": timestamp,
+        "message_length": len(message),
+        "computed_signature": computed,
+    }
