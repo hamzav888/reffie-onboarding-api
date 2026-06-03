@@ -112,3 +112,17 @@ async def hubspot_webhook(
             )
 
     return {"status": "ok"}
+
+
+@router.get("/webhook-debug")
+async def webhook_debug(request: Request) -> dict[str, str]:
+    """Temporary diagnostic endpoint. Returns the exact request.url the backend sees.
+
+    Remove after debugging.
+    """
+    return {
+        "request_url": str(request.url),
+        "request_url_path": request.url.path,
+        "host_header": request.headers.get("host", ""),
+        "scheme": request.url.scheme,
+    }
