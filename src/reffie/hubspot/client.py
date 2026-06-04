@@ -1,9 +1,12 @@
+import logging
 from typing import Any
 
 import httpx
 
 import reffie.config as config_module
 from reffie.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class HubSpotError(Exception):
@@ -152,6 +155,12 @@ async def get_deal_quote_ids(deal_id: str, settings: Settings) -> list[str]:
             f"/crm/v3/objects/deals/{deal_id}/associations/quotes",
         )
     _check_response(response, f"deal {deal_id} quote associations")
+    logger.warning(
+        "get_deal_quote_ids deal=%s status=%s body=%s",
+        deal_id,
+        response.status_code,
+        response.text,
+    )
     data: dict[str, Any] = response.json()
     results: list[dict[str, Any]] = data.get("results", [])
     return [str(r["id"]) for r in results]
@@ -182,6 +191,12 @@ async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[s
             f"/crm/v3/objects/quotes/{quote_id}/associations/line_items",
         )
     _check_response(assoc_response, f"quote {quote_id} line item associations")
+    logger.warning(
+        "get_quote_line_items_assoc quote=%s status=%s body=%s",
+        quote_id,
+        assoc_response.status_code,
+        assoc_response.text,
+    )
     assoc_data: dict[str, Any] = assoc_response.json()
     li_ids = [str(r["id"]) for r in assoc_data.get("results", [])]
 
@@ -200,6 +215,12 @@ async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[s
             },
         )
     _check_response(batch_response, f"line_items batch for quote {quote_id}")
+    logger.warning(
+        "get_quote_line_items_batch quote=%s status=%s body=%s",
+        quote_id,
+        batch_response.status_code,
+        batch_response.text,
+    )
     batch_data: dict[str, Any] = batch_response.json()
 
     items: list[dict[str, Any]] = []
