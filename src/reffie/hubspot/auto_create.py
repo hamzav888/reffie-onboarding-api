@@ -57,8 +57,14 @@ async def process_closed_won(deal_id: str, settings: Settings) -> None:
             result = await session.execute(
                 select(Account).where(Account.hubspot_deal_id == deal_id)
             )
-            if result.scalar_one_or_none() is not None:
-                logger.warning("Account for deal %s already exists, skipping", deal_id)
+            existing_account = result.scalar_one_or_none()
+            if existing_account is not None:
+                logger.warning(
+                    "process_closed_won SKIPPED deal_id=%s — account already exists (id=%s)"
+                    " — manual sync may have run first",
+                    deal_id,
+                    existing_account.id,
+                )
                 return
 
             # Re-verify the stage at processing time — the webhook can be delayed.

@@ -9,7 +9,9 @@ import hmac
 import json
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,7 +20,7 @@ from httpx import ASGITransport, AsyncClient
 from reffie.config import get_settings
 from reffie.config import settings as _settings
 from reffie.hubspot.auto_create import process_closed_won
-from reffie.hubspot.client import HubSpotAPIError
+from reffie.hubspot.client import HubSpotAPIError, get_quote_line_items
 from reffie.main import app
 from reffie.models import Account
 
@@ -500,3 +502,51 @@ async def test_db_error_during_processing_is_caught() -> None:
     with mock.patch("reffie.db.session.AsyncSessionLocal", MagicMock(return_value=mock_session)):
         await process_closed_won(_DEAL_ID, _settings)
     # Reaching here without raising confirms DB errors are swallowed in background tasks.
+
+
+# ---------------------------------------------------------------------------
+# get_quote_line_items SKU parsing (real function, httpx mocked)
+# ---------------------------------------------------------------------------
+
+
+def _fake_response(json_body: Mapping[str, Any]) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.text = json.dumps(json_body)
+    resp.json = MagicMock(return_value=json_body)
+    return resp
+
+
+def _patch_httpx_for_line_items(
+    *, assoc_body: Mapping[str, Any], batch_body: Mapping[str, Any]
+) -> Any:
+    """Patch httpx.AsyncClient so get() returns the associations response and
+    post() returns the batch-read response."""
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.get = AsyncMock(return_value=_fake_response(assoc_body))
+    client.post = AsyncMock(return_value=_fake_response(batch_body))
+    return mock.patch("reffie.hubspot.client.httpx.AsyncClient", MagicMock(return_value=client))
+
+
+async def test_get_quote_line_items_reads_hs_sku() -> None:
+    """The standard HubSpot hs_sku property is read into the normalised sku field."""
+    assoc_body = {"results": [{"toObjectId": "li-1"}]}
+    batch_body = {
+        "results": [{"id": "li-1", "properties": {"name": "Pro", "hs_sku": "PRO", "quantity": "1"}}]
+    }
+    with _patch_httpx_for_line_items(assoc_body=assoc_body, batch_body=batch_body):
+        items = await get_quote_line_items("quote-1", _settings)
+    assert items == [{"id": "li-1", "name": "Pro", "sku": "PRO", "quantity": "1", "price": ""}]
+
+
+async def test_get_quote_line_items_falls_back_to_sku() -> None:
+    """When hs_sku is absent, the custom sku property is used as a fallback."""
+    assoc_body = {"results": [{"toObjectId": "li-1"}]}
+    batch_body = {
+        "results": [{"id": "li-1", "properties": {"name": "Pro", "sku": "PRO", "price": "500"}}]
+    }
+    with _patch_httpx_for_line_items(assoc_body=assoc_body, batch_body=batch_body):
+        items = await get_quote_line_items("quote-1", _settings)
+    assert items[0]["sku"] == "PRO"

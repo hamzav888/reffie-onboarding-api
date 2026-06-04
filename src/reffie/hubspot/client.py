@@ -209,7 +209,7 @@ async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[s
         batch_response = await client.post(
             "/crm/v3/objects/line_items/batch/read",
             json={
-                "properties": ["name", "sku", "quantity", "price"],
+                "properties": ["name", "sku", "hs_sku", "hs_product_id", "quantity", "price"],
                 "inputs": [{"id": li_id} for li_id in li_ids],
             },
         )
@@ -225,11 +225,14 @@ async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[s
     items: list[dict[str, Any]] = []
     for result in batch_data.get("results", []):
         props: dict[str, Any] = result.get("properties", {})
+        # HubSpot's standard line-item SKU property is hs_sku; some portals
+        # populate the custom sku property instead. Prefer hs_sku, fall back to sku.
+        sku_value = props.get("hs_sku") or props.get("sku") or ""
         items.append(
             {
                 "id": str(result.get("id", "")),
                 "name": props.get("name") or "",
-                "sku": props.get("sku") or "",
+                "sku": sku_value,
                 "quantity": props.get("quantity") or "",
                 "price": props.get("price") or "",
             }
