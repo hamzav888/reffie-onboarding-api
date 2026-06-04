@@ -137,9 +137,8 @@ async def get_deal_quote_ids(deal_id: str, settings: Settings) -> list[str]:
     """
     Return associated quote IDs for a HubSpot deal.
 
-    Uses the v3 associations API (``/crm/v3/objects/deals/{id}/associations/quotes``).
-    The v3 response embeds ``id`` directly on each result (unlike v4 which uses
-    ``toObjectId``).
+    Uses the v4 associations API (``/crm/v4/objects/deals/{id}/associations/quotes``).
+    The v4 response uses ``toObjectId`` to identify the associated object.
 
     :param deal_id: HubSpot deal object ID.
     :param settings: Application settings providing the HubSpot credentials.
@@ -152,7 +151,7 @@ async def get_deal_quote_ids(deal_id: str, settings: Settings) -> list[str]:
         headers={"Authorization": f"Bearer {settings.hubspot_token}"},
     ) as client:
         response = await client.get(
-            f"/crm/v3/objects/deals/{deal_id}/associations/quotes",
+            f"/crm/v4/objects/deals/{deal_id}/associations/quotes",
         )
     _check_response(response, f"deal {deal_id} quote associations")
     logger.warning(
@@ -163,7 +162,7 @@ async def get_deal_quote_ids(deal_id: str, settings: Settings) -> list[str]:
     )
     data: dict[str, Any] = response.json()
     results: list[dict[str, Any]] = data.get("results", [])
-    return [str(r["id"]) for r in results]
+    return [str(r["toObjectId"]) for r in results]
 
 
 async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[str, Any]]:
@@ -172,7 +171,7 @@ async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[s
 
     Two-step fetch:
 
-    1. ``GET /crm/v3/objects/quotes/{id}/associations/line_items`` — collect IDs.
+    1. ``GET /crm/v4/objects/quotes/{id}/associations/line_items`` — collect IDs.
     2. ``POST /crm/v3/objects/line_items/batch/read`` — batch-fetch properties.
 
     Each returned item contains ``id``, ``name``, ``sku``, ``quantity``, ``price``.
@@ -188,7 +187,7 @@ async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[s
         headers={"Authorization": f"Bearer {settings.hubspot_token}"},
     ) as client:
         assoc_response = await client.get(
-            f"/crm/v3/objects/quotes/{quote_id}/associations/line_items",
+            f"/crm/v4/objects/quotes/{quote_id}/associations/line_items",
         )
     _check_response(assoc_response, f"quote {quote_id} line item associations")
     logger.warning(
@@ -198,7 +197,7 @@ async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[s
         assoc_response.text,
     )
     assoc_data: dict[str, Any] = assoc_response.json()
-    li_ids = [str(r["id"]) for r in assoc_data.get("results", [])]
+    li_ids = [str(r["toObjectId"]) for r in assoc_data.get("results", [])]
 
     if li_ids == []:
         return []

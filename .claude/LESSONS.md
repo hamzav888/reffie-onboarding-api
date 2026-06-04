@@ -4,6 +4,16 @@ _Read this file before starting any task. Write new lessons here as you discover
 
 ---
 
+## 2026-06-04 — HubSpot association API version for reads
+
+- **Always use v4 (`/crm/v4/objects/{type}/{id}/associations/{toType}`) for association reads, never v3.** The v3 associations endpoint can silently return `HTTP 200 + {"results": []}` in cases where v4 returns the correct data — even with the correct scopes granted. This was observed on the `deals→quotes` association: v3 returned empty, v4 returned the quote. Every working association function in this codebase uses v4 (`get_deal_contact_ids`, `get_deal_company_id`).
+
+- **v4 response uses `toObjectId`, not `id`.** Parse `r["toObjectId"]` from v4 results. v3 used `r["id"]` — these are NOT interchangeable.
+
+- **Object reads and batch reads stay on v3.** `GET /crm/v3/objects/{type}/{id}` (single object fetch) and `POST /crm/v3/objects/{type}/batch/read` (batch property fetch) are object-read endpoints, not association endpoints — these are unaffected by the v3/v4 association distinction and should remain as v3.
+
+---
+
 ## 2026-06-03 — Auto-account-creation robustness
 
 - **Numeric IDs serialised as strings sort lexicographically by default** (`'10' < '9'`). When sorting on string-typed numeric IDs, parse to int with a string fallback: `try (0, int(raw)) except (1, str(raw))`. This gives numeric ordering for normal HubSpot IDs and a stable fallback for any non-numeric edge cases.
