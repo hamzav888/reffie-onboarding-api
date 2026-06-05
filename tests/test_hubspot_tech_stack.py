@@ -82,6 +82,33 @@ def test_hubspot_to_ts_missing_keys_become_safe_defaults() -> None:
     assert ts["lockboxes"] is False
 
 
+def test_applications_pms_system_substitutes_pms_value() -> None:
+    props = {"applications_platform": "PMS System", "pms_system": "Buildium"}
+    ts = hubspot_to_ts(props)
+    assert ts["applications"] == "Buildium"
+
+
+def test_applications_pms_system_with_no_pms() -> None:
+    props: dict[str, str | None] = {"applications_platform": "PMS System", "pms_system": None}
+    ts = hubspot_to_ts(props)
+    assert ts["applications"] == ""
+
+
+def test_bool_yes_parses_true() -> None:
+    ts = hubspot_to_ts({"shared_leasing_email": "Yes"})
+    assert ts["sharedEmail"] is True
+
+
+def test_bool_no_parses_false() -> None:
+    ts = hubspot_to_ts({"shared_leasing_email": "No"})
+    assert ts["sharedEmail"] is False
+
+
+def test_bool_true_lowercase_parses_true() -> None:
+    ts = hubspot_to_ts({"shared_leasing_email": "true"})
+    assert ts["sharedEmail"] is True
+
+
 # ---------------------------------------------------------------------------
 # ts_to_hubspot — platform dict → HubSpot Company props
 # ---------------------------------------------------------------------------

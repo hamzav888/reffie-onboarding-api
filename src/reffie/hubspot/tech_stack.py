@@ -45,9 +45,16 @@ def hubspot_to_ts(props: Mapping[str, str | None]) -> dict[str, Any]:
     for hs_key, ts_key in _HS_TO_TS.items():
         raw = props.get(hs_key)
         if hs_key in _BOOL_HS_KEYS:
-            ts[ts_key] = raw == "true"
+            ts[ts_key] = str(raw).strip().lower() in ("true", "yes", "1")
         else:
             ts[ts_key] = raw.strip() if raw else ""
+
+    # "PMS System" is a HubSpot sentinel for applications_platform meaning the
+    # applications platform is the same product as the PMS. Substitute the
+    # resolved PMS value (already "" when unset) so the frontend can match it.
+    if ts["applications"].strip().lower() == "pms system":
+        ts["applications"] = ts["pms"]
+
     return ts
 
 
