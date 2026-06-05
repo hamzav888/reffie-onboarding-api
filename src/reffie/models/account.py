@@ -37,6 +37,7 @@ class Account(Base):
     :cvar kickoff_call_date: Date the kickoff call was or will be held.
     :cvar tech_stack: JSON object describing the customer's current technology stack.
     :cvar skipped_stages: Stage slugs intentionally skipped for this account.
+    :cvar archived: Whether the account is archived (hidden from the default list).
     :cvar created_at: Timestamp of record creation (UTC).
     :cvar updated_at: Timestamp of last update (UTC).
     :cvar pocs: Points of contact belonging to this account.
@@ -67,6 +68,11 @@ class Account(Base):
     skipped_stages: Mapped[list[str]] = mapped_column(
         ARRAY(sa.String),
         server_default=sa.text("'{}'::varchar[]"),
+        nullable=False,
+    )
+    archived: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        server_default=sa.text("false"),
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(

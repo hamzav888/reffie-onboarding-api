@@ -240,6 +240,30 @@ async def get_quote_line_items(quote_id: str, settings: Settings) -> list[dict[s
     return items
 
 
+async def get_deal_line_items(deal_id: str, settings: Settings) -> list[dict[str, Any]]:
+    """
+    Return all line items across every quote associated with a HubSpot deal.
+
+    Walks deal → quotes → line items. A failure fetching one quote's line items
+    is logged and skipped so a single bad quote does not abort the whole deal.
+
+    :param deal_id: HubSpot deal object ID.
+    :param settings: Application settings providing the HubSpot credentials.
+    :returns: Combined list of normalised line-item dicts (may be empty).
+    :raises HubSpotNotFoundError: If the deal does not exist.
+    :raises HubSpotAPIError: For other 4xx/5xx responses fetching the quote list.
+    """
+    quote_ids = await get_deal_quote_ids(deal_id, settings)
+    items: list[dict[str, Any]] = []
+    for quote_id in quote_ids:
+        try:
+            items.extend(await get_quote_line_items(quote_id, settings))
+        except (HubSpotAPIError, HubSpotNotFoundError):
+            logger.exception("Failed to fetch line items for quote %s", quote_id)
+            continue
+    return items
+
+
 TECH_STACK_PROPERTIES: list[str] = [
     "pms_system",
     "tour_scheduling_platform",

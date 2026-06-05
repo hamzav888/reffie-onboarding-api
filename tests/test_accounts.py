@@ -27,6 +27,7 @@ def make_account(**kwargs: object) -> Account:
         onboarding_stage=kwargs.get("onboarding_stage", "kick-off"),
         tech_stack=kwargs.get("tech_stack", {}),
         skipped_stages=kwargs.get("skipped_stages", []),
+        archived=kwargs.get("archived", False),
         created_at=kwargs.get("created_at", datetime.now(UTC)),
         updated_at=kwargs.get("updated_at", datetime.now(UTC)),
     )
@@ -221,6 +222,84 @@ async def test_patch_account_not_found(mock_session: AsyncMock) -> None:
         response = await client.patch(f"/accounts/{uuid.uuid4()}", json={"cs_rep": "X"})
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Archive support
+# ---------------------------------------------------------------------------
+
+
+async def test_list_excludes_archived_by_default(mock_session: AsyncMock) -> None:
+    active = make_account(company_name="Active Co")
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [active]
+    mock_session.execute.return_value = mock_result
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/accounts")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    # The default list must filter on archived; the explicit WHERE proves it.
+    stmt = mock_session.execute.call_args.args[0]
+    assert stmt.whereclause is not None
+    assert "archived" in str(stmt.whereclause).lower()
+
+
+async def test_list_includes_archived_when_flag_set(mock_session: AsyncMock) -> None:
+    active = make_account(company_name="Active Co")
+    archived = make_account(company_name="Archived Co", archived=True)
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [active, archived]
+    mock_session.execute.return_value = mock_result
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/accounts?include_archived=true")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    # With the flag set, no archived filter is applied.
+    stmt = mock_session.execute.call_args.args[0]
+    assert stmt.whereclause is None
+
+
+async def test_patch_can_archive_account(mock_session: AsyncMock) -> None:
+    account = make_account(archived=False)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = account
+    mock_session.execute.return_value = mock_result
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.patch(f"/accounts/{account.id}", json={"archived": True})
+
+    assert response.status_code == 200
+    assert response.json()["archived"] is True
+
+
+async def test_patch_can_unarchive_account(mock_session: AsyncMock) -> None:
+    account = make_account(archived=True)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = account
+    mock_session.execute.return_value = mock_result
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.patch(f"/accounts/{account.id}", json={"archived": False})
+
+    assert response.status_code == 200
+    assert response.json()["archived"] is False
+
+
+async def test_get_by_id_returns_archived_account(mock_session: AsyncMock) -> None:
+    account = make_account(archived=True)
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = account
+    mock_session.execute.return_value = mock_result
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/accounts/{account.id}")
+
+    assert response.status_code == 200
+    assert response.json()["archived"] is True
 
 
 # ---------------------------------------------------------------------------

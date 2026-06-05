@@ -111,6 +111,7 @@ def _make_account(deal_id: str = _DEAL_ID) -> Account:
         onboarding_stage="Pre-kick off",
         tech_stack={},
         skipped_stages=[],
+        archived=False,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )

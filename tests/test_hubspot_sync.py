@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime
+from typing import Any
 from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,9 +9,15 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import reffie.hubspot.sync as sync_module
 from reffie.auth import CurrentUser, get_current_user
+from reffie.config import settings as _settings
 from reffie.db.session import get_db_session
 from reffie.hubspot.client import HubSpotAPIError, HubSpotNotFoundError
+
+# Bound to the real function before the autouse stub patches the module attribute,
+# so the aggregation tests below exercise the real implementation.
+from reffie.hubspot.client import get_deal_line_items as real_get_deal_line_items
 from reffie.main import app
 from reffie.models import Account, Poc
 
@@ -72,6 +79,7 @@ def make_synced_account() -> Account:
         onboarding_stage="pre-kick-off",
         tech_stack={},
         skipped_stages=[],
+        archived=False,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -94,6 +102,7 @@ def make_loaded_account() -> Account:
         onboarding_stage="Pre-kick off",
         tech_stack={},
         skipped_stages=[],
+        archived=False,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -134,6 +143,15 @@ def override_deps(mock_session: AsyncMock) -> Generator[None]:
     app.dependency_overrides[get_db_session] = fake_db
     yield
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def stub_deal_line_items() -> Generator[AsyncMock]:
+    """pull_deal fetches line items for the contract-length override; stub to empty by default."""
+    with mock.patch(
+        "reffie.hubspot.client.get_deal_line_items", new=AsyncMock(return_value=[])
+    ) as m:
+        yield m
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +240,7 @@ async def test_sync_updates_existing_account(mock_session: AsyncMock) -> None:
         onboarding_stage="pre-kick-off",  # same as existing, not overwritten by HubSpot data
         tech_stack={},
         skipped_stages=[],
+        archived=False,
         created_at=existing.created_at,
         updated_at=existing.updated_at,
     )
@@ -516,3 +535,133 @@ async def test_sync_company_bool_fields_converted(mock_session: AsyncMock) -> No
     assert ts["lockboxes"] is True
     assert ts["facebook"] is True
     assert ts["sharedEmail"] is False
+
+
+# ---------------------------------------------------------------------------
+# Money-back-guarantee contract_length override
+# ---------------------------------------------------------------------------
+
+
+async def test_sync_money_back_overrides_contract_length(
+    mock_session: AsyncMock, stub_deal_line_items: AsyncMock
+) -> None:
+    """A money-back line item forces contract_length, overriding the deal field."""
+    _setup_new_account_session(mock_session, make_loaded_account())
+    stub_deal_line_items.return_value = [
+        {
+            "id": "1",
+            "name": "6-Month Money-Back Guarantee",
+            "sku": "",
+            "quantity": "1",
+            "price": "0",
+        }
+    ]
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch("reffie.hubspot.client.get_deal_contact_ids", new=AsyncMock(return_value=[])),
+        mock.patch("reffie.hubspot.client.get_deal_company_id", new=AsyncMock(return_value=None)),
+    ):
+        await sync_module.pull_deal(_DEAL_ID, mock_session, _settings)
+
+    created = mock_session.add.call_args.args[0]
+    # _DEAL_RESPONSE carries contract_length "12 months"; the override must win.
+    assert created.contract_length == "6 months"
+
+
+async def test_sync_no_money_back_keeps_deal_contract_length(mock_session: AsyncMock) -> None:
+    """Without a money-back line item, the deal-level contract_length is preserved."""
+    _setup_new_account_session(mock_session, make_loaded_account())
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch("reffie.hubspot.client.get_deal_contact_ids", new=AsyncMock(return_value=[])),
+        mock.patch("reffie.hubspot.client.get_deal_company_id", new=AsyncMock(return_value=None)),
+    ):
+        await sync_module.pull_deal(_DEAL_ID, mock_session, _settings)
+
+    created = mock_session.add.call_args.args[0]
+    assert created.contract_length == "12 months"
+
+
+def test_has_money_back_guarantee_matches_case_insensitive() -> None:
+    items = [{"name": "6-Month Money-Back Guarantee"}]
+    assert sync_module.has_money_back_guarantee(items) is True
+
+
+def test_has_money_back_guarantee_false_for_other_products() -> None:
+    items = [{"name": "Pro"}, {"name": "Add-on"}]
+    assert sync_module.has_money_back_guarantee(items) is False
+
+
+def test_has_money_back_guarantee_safe_on_missing_name() -> None:
+    items: list[dict[str, Any]] = [{"sku": "PRO"}, {"name": None}, {}]
+    assert sync_module.has_money_back_guarantee(items) is False
+
+
+async def test_get_deal_line_items_aggregates_across_quotes() -> None:
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_quote_ids",
+            new=AsyncMock(return_value=["q1", "q2"]),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_quote_line_items",
+            new=AsyncMock(side_effect=[[{"id": "1", "name": "Pro"}], [{"id": "2", "name": "MB"}]]),
+        ),
+    ):
+        items = await real_get_deal_line_items(_DEAL_ID, _settings)
+    assert [i["id"] for i in items] == ["1", "2"]
+
+
+async def test_get_deal_line_items_skips_failing_quote() -> None:
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_quote_ids",
+            new=AsyncMock(return_value=["q1", "q2"]),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_quote_line_items",
+            new=AsyncMock(side_effect=[HubSpotAPIError("boom"), [{"id": "2", "name": "X"}]]),
+        ),
+    ):
+        items = await real_get_deal_line_items(_DEAL_ID, _settings)
+    assert [i["id"] for i in items] == ["2"]
+
+
+# ---------------------------------------------------------------------------
+# property_type multi-select parsing
+# ---------------------------------------------------------------------------
+
+
+async def _run_pull_deal_with_property_type(mock_session: AsyncMock, raw_value: str) -> Account:
+    """Run pull_deal with a HubSpot property_type value; return the created account."""
+    _setup_new_account_session(mock_session, make_loaded_account())
+    deal = {"id": _DEAL_ID, "properties": {"hs_object_id": _DEAL_ID, "property_type": raw_value}}
+    with (
+        mock.patch("reffie.hubspot.client.get_deal_properties", new=AsyncMock(return_value=deal)),
+        mock.patch("reffie.hubspot.client.get_deal_contact_ids", new=AsyncMock(return_value=[])),
+        mock.patch("reffie.hubspot.client.get_deal_company_id", new=AsyncMock(return_value=None)),
+    ):
+        await sync_module.pull_deal(_DEAL_ID, mock_session, _settings)
+    created: Account = mock_session.add.call_args.args[0]
+    return created
+
+
+async def test_property_type_multi_select_joins_with_comma(mock_session: AsyncMock) -> None:
+    created = await _run_pull_deal_with_property_type(mock_session, "SFR;Condo")
+    assert created.property_type == "SFR, Condo"
+
+
+async def test_property_type_single_value_no_semicolons(mock_session: AsyncMock) -> None:
+    created = await _run_pull_deal_with_property_type(mock_session, "SFR")
+    assert created.property_type == "SFR"
+
+
+async def test_property_type_empty_stays_empty(mock_session: AsyncMock) -> None:
+    created = await _run_pull_deal_with_property_type(mock_session, "")
+    assert created.property_type == ""

@@ -37,17 +37,25 @@ async def _load_account_detail(account_id: uuid.UUID, db_session: AsyncSession) 
 
 @router.get("", response_model=list[AccountSummary])
 async def list_accounts(
+    include_archived: bool = False,
     db_session: AsyncSession = Depends(get_db_session),
     _current_user: CurrentUser = Depends(get_current_user),
 ) -> list[AccountSummary]:
     """
-    Return a summary list of all accounts ordered by company name.
+    Return a summary list of accounts ordered by company name.
 
+    Archived accounts are excluded by default; pass ``include_archived=true`` to
+    return them as well.
+
+    :param include_archived: When ``True``, include archived accounts in the list.
     :param db_session: Injected database session.
     :param _current_user: Authenticated user (required, not used directly).
     :returns: List of :class:`~reffie.schemas.account.AccountSummary`.
     """
-    result = await db_session.execute(select(Account).order_by(Account.company_name))
+    stmt = select(Account).order_by(Account.company_name)
+    if not include_archived:
+        stmt = stmt.where(Account.archived.is_(False))
+    result = await db_session.execute(stmt)
     accounts = result.scalars().all()
     return [AccountSummary.model_validate(a) for a in accounts]
 

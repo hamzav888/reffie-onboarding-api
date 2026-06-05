@@ -43,6 +43,7 @@ class AccountUpdate(BaseModel):
     kickoff_call_date: date | None = None
     skipped_stages: list[str] | None = None
     tech_stack: dict[str, Any] | None = None
+    archived: bool | None = None
 
 
 class AccountSummary(BaseModel):
@@ -57,6 +58,7 @@ class AccountSummary(BaseModel):
     onboarding_stage: str
     skipped_stages: list[str]
     tech_stack: dict[str, Any] = Field(default_factory=dict)
+    archived: bool
 
 
 class AccountDetail(BaseModel):
@@ -78,6 +80,7 @@ class AccountDetail(BaseModel):
     kickoff_call_date: date | None
     skipped_stages: list[str]
     tech_stack: dict[str, Any] = Field(default_factory=dict)
+    archived: bool
     created_at: datetime
     updated_at: datetime
     pocs: list[PocOut]

@@ -30,6 +30,7 @@ def _make_account(
         onboarding_stage="Pre-kick off",
         tech_stack=tech_stack,
         skipped_stages=[],
+        archived=False,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )

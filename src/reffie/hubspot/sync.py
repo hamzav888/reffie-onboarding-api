@@ -37,6 +37,20 @@ _CONTACT_PROPERTIES: list[str] = [
     "jobtitle",
 ]
 
+# A line item whose name contains this token forces contract_length, overriding
+# whatever the deal-level contract_length field says.
+_MONEY_BACK_NAME_TOKEN = "money-back"  # noqa: S105 — product-name substring, not a secret
+_MONEY_BACK_CONTRACT_LENGTH = "6 months"
+
+
+def has_money_back_guarantee(line_items: list[dict[str, Any]]) -> bool:
+    """Return ``True`` if any line item is the money-back-guarantee product.
+
+    :param line_items: Normalised line-item dicts (each with a ``name`` key).
+    :returns: ``True`` if any line item name contains the money-back token.
+    """
+    return any(_MONEY_BACK_NAME_TOKEN in str(i.get("name", "")).lower() for i in line_items)
+
 
 def _str(props: dict[str, Any], key: str) -> str:
     """Return a stripped string value from a HubSpot properties dict, or ``""``."""
@@ -102,7 +116,15 @@ def _apply_deal_fields_to_account(account: Account, props: dict[str, Any], deal_
     account.hubspot_deal_id = _str(props, "hs_object_id") or deal_id
     account.company_name = _str(props, "dealname") or "Unknown"
     account.location = ", ".join(filter(None, [city, state])) or "Unknown"
-    account.property_type = _str(props, "property_type") or "Unknown"
+    # property_type is a HubSpot multi-checkbox: its API value is a
+    # semicolon-separated string (e.g. "SFR;Condo"). Normalise to a
+    # comma-space-joined string; empty stays empty.
+    raw_property_type = _str(props, "property_type")
+    if raw_property_type:
+        parts = [p.strip() for p in raw_property_type.split(";") if p.strip()]
+        account.property_type = ", ".join(parts)
+    else:
+        account.property_type = ""
     account.cs_rep = _str(props, "onboarding_cs_rep") or "Unassigned"
     # onboarding_stage is intentionally NOT set here — the platform owns it.
     # New accounts receive PLATFORM_STAGES[0] at creation time; existing accounts
@@ -206,6 +228,18 @@ async def pull_deal(deal_id: str, db_session: AsyncSession, settings: Settings) 
     if company_props is not None and company_id is not None:
         account.hubspot_company_id = company_id
         account.tech_stack = tech_stack_module.hubspot_to_ts(company_props)
+
+    # Best-effort: a money-back-guarantee line item forces contract_length,
+    # overriding the deal-level field. A HubSpot hiccup here must not fail the sync.
+    try:
+        line_items = await hubspot_client.get_deal_line_items(deal_id, settings)
+    except (hubspot_client.HubSpotAPIError, hubspot_client.HubSpotNotFoundError):
+        logger.exception(
+            "Failed to fetch line items for deal %s — skipping contract override", deal_id
+        )
+        line_items = []
+    if has_money_back_guarantee(line_items):
+        account.contract_length = _MONEY_BACK_CONTRACT_LENGTH
 
     await db_session.flush()
 

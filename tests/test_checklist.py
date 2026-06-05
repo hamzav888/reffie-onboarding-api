@@ -25,6 +25,7 @@ def make_account() -> Account:
         onboarding_stage="kick-off",
         tech_stack={},
         skipped_stages=[],
+        archived=False,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
