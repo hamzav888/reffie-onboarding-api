@@ -39,8 +39,6 @@ _DEAL_RESPONSE: dict[str, object] = {
         "contract_length": "12 months",
         "success_metrics": "Reduce vacancy to 5%",
         "property_type": "multifamily",
-        "city": "New York",
-        "state": "NY",
     },
 }
 
@@ -64,6 +62,7 @@ _COMPANY_PROPS: dict[str, str | None] = {
     "zillow_tier": "Paid",
     "facebook_marketplace": "true",
     "shared_leasing_email": "false",
+    "state": "California",
 }
 
 
@@ -223,8 +222,10 @@ async def test_sync_creates_new_account(mock_session: AsyncMock) -> None:
     assert body["cs_rep"] == "Alice"
     # New accounts start at the first platform stage — HubSpot does not own onboarding_stage.
     assert body["onboarding_stage"] == "Pre-kick off"
-    assert body["location"] == "New York, NY"
     mock_session.add.assert_called_once()
+    # No associated company → location defaults to "Unknown" (no longer deal-derived).
+    created = mock_session.add.call_args.args[0]
+    assert created.location == "Unknown"
 
 
 async def test_sync_updates_existing_account(mock_session: AsyncMock) -> None:
@@ -409,6 +410,9 @@ async def test_sync_pulls_company_and_sets_tech_stack(mock_session: AsyncMock) -
     assert body["tech_stack"]["tour"] == "Showing Suite"
     assert body["tech_stack"]["applications"] == "ResidentCheck"
     assert body["tech_stack"]["zillow"] == "Paid"
+    # location is sourced from the company's state property.
+    created = mock_session.add.call_args.args[0]
+    assert created.location == "California"
 
 
 async def test_sync_no_company_defaults_tech_stack(mock_session: AsyncMock) -> None:
@@ -441,6 +445,9 @@ async def test_sync_no_company_defaults_tech_stack(mock_session: AsyncMock) -> N
     body = response.json()
     assert body["hubspot_company_id"] is None
     assert body["tech_stack"] == {}
+    # No company → no company state → location defaults to "Unknown".
+    created = mock_session.add.call_args.args[0]
+    assert created.location == "Unknown"
 
 
 async def test_sync_skips_deleted_contact(mock_session: AsyncMock) -> None:
@@ -503,6 +510,7 @@ async def test_sync_company_bool_fields_converted(mock_session: AsyncMock) -> No
         "zillow_tier": None,
         "facebook_marketplace": "true",
         "shared_leasing_email": "false",
+        "state": "Texas",
     }
 
     with (
@@ -535,6 +543,33 @@ async def test_sync_company_bool_fields_converted(mock_session: AsyncMock) -> No
     assert ts["lockboxes"] is True
     assert ts["facebook"] is True
     assert ts["sharedEmail"] is False
+
+
+async def test_sync_company_no_state_location_unknown(mock_session: AsyncMock) -> None:
+    """A company with no ``state`` property must leave location as ``"Unknown"``."""
+    _setup_new_account_session(mock_session, make_loaded_account())
+    props_no_state: dict[str, str | None] = {**_COMPANY_PROPS, "state": None}
+
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch("reffie.hubspot.client.get_deal_contact_ids", new=AsyncMock(return_value=[])),
+        mock.patch("reffie.hubspot.client.get_contact_properties", new=AsyncMock()),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value="company-3"),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_company_properties",
+            new=AsyncMock(return_value=props_no_state),
+        ),
+    ):
+        await sync_module.pull_deal(_DEAL_ID, mock_session, _settings)
+
+    created = mock_session.add.call_args.args[0]
+    assert created.location == "Unknown"
 
 
 # ---------------------------------------------------------------------------

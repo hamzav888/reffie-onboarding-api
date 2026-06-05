@@ -274,6 +274,10 @@ TECH_STACK_PROPERTIES: list[str] = [
     "shared_leasing_email",
 ]
 
+# Company-level properties used to derive the account's location. Kept separate
+# from TECH_STACK_PROPERTIES so the two concerns can evolve independently.
+COMPANY_LOCATION_PROPERTIES: list[str] = ["state"]
+
 
 async def get_deal_company_id(deal_id: str, settings: Settings) -> str | None:
     """

@@ -25,8 +25,6 @@ _DEAL_PROPERTIES: list[str] = [
     "contract_length",
     "success_metrics",
     "property_type",
-    "city",
-    "state",
 ]
 
 _CONTACT_PROPERTIES: list[str] = [
@@ -111,11 +109,10 @@ def _apply_deal_fields_to_account(account: Account, props: dict[str, Any], deal_
     :param deal_id: Fallback value used for ``hubspot_deal_id`` if ``hs_object_id``
         is absent from the response.
     """
-    city = _str(props, "city")
-    state = _str(props, "state")
     account.hubspot_deal_id = _str(props, "hs_object_id") or deal_id
     account.company_name = _str(props, "dealname") or "Unknown"
-    account.location = ", ".join(filter(None, [city, state])) or "Unknown"
+    # location is intentionally NOT set here — it is sourced from the associated
+    # company's state property in pull_deal, not from the deal.
     # property_type is a HubSpot multi-checkbox: its API value is a
     # semicolon-separated string (e.g. "SFR;Condo"). Normalise to a
     # comma-space-joined string; empty stays empty.
@@ -203,7 +200,9 @@ async def pull_deal(deal_id: str, db_session: AsyncSession, settings: Settings) 
     company_props: dict[str, str | None] | None = None
     if company_id is not None:
         company_props = await hubspot_client.get_company_properties(
-            company_id, hubspot_client.TECH_STACK_PROPERTIES, settings
+            company_id,
+            hubspot_client.TECH_STACK_PROPERTIES + hubspot_client.COMPANY_LOCATION_PROPERTIES,
+            settings,
         )
 
     existing_result = await db_session.execute(
@@ -225,9 +224,13 @@ async def pull_deal(deal_id: str, db_session: AsyncSession, settings: Settings) 
 
     _apply_deal_fields_to_account(account, props, deal_id)
 
+    # location is sourced from the company's state; default to "Unknown" so a
+    # deal with no associated company (or a company with no state) is consistent.
+    account.location = "Unknown"
     if company_props is not None and company_id is not None:
         account.hubspot_company_id = company_id
         account.tech_stack = tech_stack_module.hubspot_to_ts(company_props)
+        account.location = _str(company_props, "state") or "Unknown"
 
     # Best-effort: a money-back-guarantee line item forces contract_length,
     # overriding the deal-level field. A HubSpot hiccup here must not fail the sync.
