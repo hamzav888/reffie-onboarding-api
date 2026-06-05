@@ -54,11 +54,15 @@ class AccountSummary(BaseModel):
     id: uuid.UUID
     hubspot_company_id: str | None = None
     company_name: str
+    location: str
+    property_type: str
+    arr: Decimal | None
     cs_rep: str
     onboarding_stage: str
     skipped_stages: list[str]
     tech_stack: dict[str, Any] = Field(default_factory=dict)
     archived: bool
+    checklist_items: list[ChecklistItemOut] = []
 
 
 class AccountDetail(BaseModel):

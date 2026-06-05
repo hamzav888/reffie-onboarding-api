@@ -52,7 +52,11 @@ async def list_accounts(
     :param _current_user: Authenticated user (required, not used directly).
     :returns: List of :class:`~reffie.schemas.account.AccountSummary`.
     """
-    stmt = select(Account).order_by(Account.company_name)
+    stmt = (
+        select(Account)
+        .options(selectinload(Account.checklist_items))
+        .order_by(Account.company_name)
+    )
     if not include_archived:
         stmt = stmt.where(Account.archived.is_(False))
     result = await db_session.execute(stmt)

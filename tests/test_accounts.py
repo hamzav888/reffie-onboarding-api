@@ -94,6 +94,11 @@ async def test_list_accounts_returns_summaries(mock_session: AsyncMock) -> None:
     assert len(data) == 1
     assert data[0]["company_name"] == "Acme Corp"
     assert data[0]["cs_rep"] == "Alice"
+    # Summary must carry the fields the dashboard renders (see schema AccountSummary).
+    assert data[0]["location"] == "New York"
+    assert data[0]["property_type"] == "commercial"
+    assert data[0]["arr"] == "100000.00"
+    assert data[0]["checklist_items"] == []
 
 
 async def test_list_accounts_empty(mock_session: AsyncMock) -> None:
