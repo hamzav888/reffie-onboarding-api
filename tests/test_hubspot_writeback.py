@@ -4,8 +4,8 @@ from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
 from reffie.config import settings as _settings
-from reffie.hubspot.client import HubSpotAPIError
-from reffie.hubspot.writeback import sync_stage_to_hubspot
+from reffie.hubspot.client import HubSpotAPIError, HubSpotNotFoundError
+from reffie.hubspot.writeback import sync_cs_rep_to_hubspot, sync_stage_to_hubspot
 from reffie.models import Account, ChecklistItem
 
 # ---------------------------------------------------------------------------
@@ -15,18 +15,24 @@ from reffie.models import Account, ChecklistItem
 _DEAL_ID = "hs-deal-123"
 
 
+_COMPANY_ID = "hs-company-456"
+
+
 def _make_account(
     onboarding_stage: str,
     hubspot_deal_id: str | None = _DEAL_ID,
+    hubspot_company_id: str | None = None,
+    cs_rep: str = "Alice",
     checklist_items: list[ChecklistItem] | None = None,
 ) -> Account:
     account = Account(
         id=uuid.uuid4(),
         hubspot_deal_id=hubspot_deal_id,
+        hubspot_company_id=hubspot_company_id,
         company_name="Test Co",
         location="Austin, TX",
         property_type="multifamily",
-        cs_rep="Alice",
+        cs_rep=cs_rep,
         onboarding_stage=onboarding_stage,
         tech_stack={},
         skipped_stages=[],
@@ -217,4 +223,85 @@ async def test_hubspot_api_error_does_not_raise() -> None:
         mock.patch("reffie.hubspot.client.update_deal_properties", mock_update),
     ):
         await sync_stage_to_hubspot(account.id, _settings)
+    mock_update.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# sync_cs_rep_to_hubspot
+# ---------------------------------------------------------------------------
+
+
+async def test_cs_rep_writeback_calls_update_company_properties() -> None:
+    account = _make_account("Pre-kick off", hubspot_company_id=_COMPANY_ID, cs_rep="Alice")
+    mock_update = AsyncMock()
+    with (
+        _patch_db(account),
+        mock.patch("reffie.hubspot.client.update_company_properties", mock_update),
+    ):
+        await sync_cs_rep_to_hubspot(account.id, _settings)
+    mock_update.assert_called_once_with(_COMPANY_ID, {"onboarding_cs_rep": "Alice"}, _settings)
+
+
+async def test_cs_rep_writeback_skips_when_no_company_id() -> None:
+    account = _make_account("Pre-kick off", hubspot_company_id=None, cs_rep="Alice")
+    mock_update = AsyncMock()
+    with (
+        _patch_db(account),
+        mock.patch("reffie.hubspot.client.update_company_properties", mock_update),
+    ):
+        await sync_cs_rep_to_hubspot(account.id, _settings)
+    mock_update.assert_not_called()
+
+
+async def test_cs_rep_writeback_skips_unassigned_sentinel() -> None:
+    account = _make_account("Pre-kick off", hubspot_company_id=_COMPANY_ID, cs_rep="Unassigned")
+    mock_update = AsyncMock()
+    with (
+        _patch_db(account),
+        mock.patch("reffie.hubspot.client.update_company_properties", mock_update),
+    ):
+        await sync_cs_rep_to_hubspot(account.id, _settings)
+    mock_update.assert_not_called()
+
+
+async def test_cs_rep_writeback_skips_blank_cs_rep() -> None:
+    account = _make_account("Pre-kick off", hubspot_company_id=_COMPANY_ID, cs_rep="")
+    mock_update = AsyncMock()
+    with (
+        _patch_db(account),
+        mock.patch("reffie.hubspot.client.update_company_properties", mock_update),
+    ):
+        await sync_cs_rep_to_hubspot(account.id, _settings)
+    mock_update.assert_not_called()
+
+
+async def test_cs_rep_writeback_skips_missing_account() -> None:
+    mock_update = AsyncMock()
+    with (
+        _patch_db(None),
+        mock.patch("reffie.hubspot.client.update_company_properties", mock_update),
+    ):
+        await sync_cs_rep_to_hubspot(uuid.uuid4(), _settings)
+    mock_update.assert_not_called()
+
+
+async def test_cs_rep_writeback_swallows_hubspot_api_error() -> None:
+    account = _make_account("Pre-kick off", hubspot_company_id=_COMPANY_ID, cs_rep="Alice")
+    mock_update = AsyncMock(side_effect=HubSpotAPIError("HubSpot 500"))
+    with (
+        _patch_db(account),
+        mock.patch("reffie.hubspot.client.update_company_properties", mock_update),
+    ):
+        await sync_cs_rep_to_hubspot(account.id, _settings)
+    mock_update.assert_called_once()
+
+
+async def test_cs_rep_writeback_swallows_hubspot_not_found_error() -> None:
+    account = _make_account("Pre-kick off", hubspot_company_id=_COMPANY_ID, cs_rep="Alice")
+    mock_update = AsyncMock(side_effect=HubSpotNotFoundError("company not found"))
+    with (
+        _patch_db(account),
+        mock.patch("reffie.hubspot.client.update_company_properties", mock_update),
+    ):
+        await sync_cs_rep_to_hubspot(account.id, _settings)
     mock_update.assert_called_once()

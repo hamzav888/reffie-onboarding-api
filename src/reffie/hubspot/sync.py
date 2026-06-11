@@ -201,7 +201,9 @@ async def pull_deal(deal_id: str, db_session: AsyncSession, settings: Settings) 
     if company_id is not None:
         company_props = await hubspot_client.get_company_properties(
             company_id,
-            hubspot_client.TECH_STACK_PROPERTIES + hubspot_client.COMPANY_LOCATION_PROPERTIES,
+            hubspot_client.TECH_STACK_PROPERTIES
+            + hubspot_client.COMPANY_LOCATION_PROPERTIES
+            + hubspot_client.COMPANY_ONBOARDING_PROPERTIES,
             settings,
         )
 
@@ -231,6 +233,10 @@ async def pull_deal(deal_id: str, db_session: AsyncSession, settings: Settings) 
         account.hubspot_company_id = company_id
         account.tech_stack = tech_stack_module.hubspot_to_ts(company_props)
         account.location = _str(company_props, "state") or "Unknown"
+        # Company-level onboarding_cs_rep is authoritative; override the deal-derived value.
+        company_cs_rep = _str(company_props, "onboarding_cs_rep")
+        if company_cs_rep != "":
+            account.cs_rep = company_cs_rep
 
     # Best-effort: a money-back-guarantee line item forces contract_length,
     # overriding the deal-level field. A HubSpot hiccup here must not fail the sync.

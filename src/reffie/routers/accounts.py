@@ -147,6 +147,8 @@ async def patch_account(
     background_tasks.add_task(writeback.sync_stage_to_hubspot, account.id, settings)
     if "tech_stack" in patch_data:
         background_tasks.add_task(writeback.sync_tech_stack_to_hubspot, account.id, settings)
+    if "cs_rep" in patch_data:
+        background_tasks.add_task(writeback.sync_cs_rep_to_hubspot, account.id, settings)
     return AccountDetail.model_validate(account)
 
 

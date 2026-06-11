@@ -308,6 +308,127 @@ async def test_webhook_closed_won_schedules_task() -> None:
     mock_process.assert_called_once_with("9001", _settings)
 
 
+async def test_webhook_cs_rep_change_schedules_sync() -> None:
+    body = json.dumps(
+        [
+            _make_event(
+                property_name="onboarding_cs_rep",
+                property_value="Bob",
+                object_id=9001,
+            )
+        ]
+    )
+    mock_sync = AsyncMock()
+    mock_process = AsyncMock()
+    with (
+        mock.patch("reffie.hubspot.webhook_sync.sync_deal_property", mock_sync),
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    # cs_rep changes dispatch the property-sync task, not closed-won processing.
+    mock_sync.assert_called_once_with("9001", "onboarding_cs_rep", "Bob")
+    mock_process.assert_not_called()
+
+
+async def test_webhook_closed_won_does_not_trigger_property_sync() -> None:
+    body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
+    mock_sync = AsyncMock()
+    mock_process = AsyncMock()
+    with (
+        mock.patch("reffie.hubspot.webhook_sync.sync_deal_property", mock_sync),
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    mock_process.assert_called_once_with("9001", _settings)
+    mock_sync.assert_not_called()
+
+
+async def test_webhook_unmapped_property_no_task_scheduled() -> None:
+    # "amount" is a deal.propertyChange but not in WEBHOOK_FIELD_MAP — no task.
+    body = json.dumps([_make_event(property_name="amount", property_value="120000")])
+    mock_sync = AsyncMock()
+    mock_process = AsyncMock()
+    with (
+        mock.patch("reffie.hubspot.webhook_sync.sync_deal_property", mock_sync),
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    mock_sync.assert_not_called()
+    mock_process.assert_not_called()
+
+
+async def test_webhook_company_cs_rep_change_schedules_sync() -> None:
+    body = json.dumps(
+        [
+            _make_event(
+                subscription_type="company.propertyChange",
+                property_name="onboarding_cs_rep",
+                property_value="Carol",
+                object_id=8001,
+            )
+        ]
+    )
+    mock_company_sync = AsyncMock()
+    mock_deal_sync = AsyncMock()
+    mock_process = AsyncMock()
+    with (
+        mock.patch("reffie.hubspot.webhook_sync.sync_company_property", mock_company_sync),
+        mock.patch("reffie.hubspot.webhook_sync.sync_deal_property", mock_deal_sync),
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    mock_company_sync.assert_called_once_with("8001", "onboarding_cs_rep", "Carol")
+    mock_deal_sync.assert_not_called()
+    mock_process.assert_not_called()
+
+
+async def test_webhook_company_unmapped_property_is_skipped() -> None:
+    body = json.dumps(
+        [
+            _make_event(
+                subscription_type="company.propertyChange",
+                property_name="state",
+                property_value="Texas",
+                object_id=8001,
+            )
+        ]
+    )
+    mock_company_sync = AsyncMock()
+    with mock.patch("reffie.hubspot.webhook_sync.sync_company_property", mock_company_sync):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    mock_company_sync.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # process_closed_won unit tests
 # ---------------------------------------------------------------------------

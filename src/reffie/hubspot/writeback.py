@@ -99,6 +99,46 @@ async def sync_stage_to_hubspot(account_id: uuid.UUID, settings: Settings) -> No
         )
 
 
+async def sync_cs_rep_to_hubspot(account_id: uuid.UUID, settings: Settings) -> None:
+    """
+    Push the platform's ``cs_rep`` for this account to the associated HubSpot Company.
+
+    Opens its own database session — safe to call as a background task after the
+    request session has closed.  Failures are logged but never re-raised.
+
+    A blank or ``"Unassigned"`` ``cs_rep`` is never written — that value is the
+    platform's internal sentinel for "no rep set" and must not reach HubSpot.
+
+    :param account_id: UUID of the account whose CS rep should be synced.
+    :param settings: Application settings providing HubSpot credentials.
+    """
+    async with db_session_module.AsyncSessionLocal() as session:
+        result = await session.execute(select(Account).where(Account.id == account_id))
+        account = result.scalar_one_or_none()
+
+    if account is None:
+        return
+
+    if account.hubspot_company_id is None:
+        return
+
+    if not account.cs_rep or account.cs_rep.strip() == "" or account.cs_rep == "Unassigned":
+        return
+
+    try:
+        await hubspot_client.update_company_properties(
+            account.hubspot_company_id,
+            {"onboarding_cs_rep": account.cs_rep},
+            settings,
+        )
+    except (hubspot_client.HubSpotAPIError, hubspot_client.HubSpotNotFoundError):
+        logger.exception(
+            "HubSpot cs_rep write-back failed for account %s / company %s",
+            account_id,
+            account.hubspot_company_id,
+        )
+
+
 async def sync_tech_stack_to_hubspot(account_id: uuid.UUID, settings: Settings) -> None:
     """
     Push the platform's ``tech_stack`` for this account to the associated HubSpot Company.

@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 import reffie.hubspot.auto_create as auto_create_module
+import reffie.hubspot.webhook_sync as webhook_sync_module
 from reffie.config import Settings, get_settings
 from reffie.schemas.hubspot_webhook import HubSpotWebhookEvent
 
@@ -123,6 +124,26 @@ async def hubspot_webhook(
                 auto_create_module.process_closed_won,
                 str(event.object_id),
                 settings,
+            )
+        elif (
+            event.subscription_type == "deal.propertyChange"
+            and event.property_name in webhook_sync_module.WEBHOOK_FIELD_MAP
+        ):
+            background_tasks.add_task(
+                webhook_sync_module.sync_deal_property,
+                str(event.object_id),
+                event.property_name,
+                event.property_value,
+            )
+        elif (
+            event.subscription_type == "company.propertyChange"
+            and event.property_name in webhook_sync_module.COMPANY_WEBHOOK_FIELD_MAP
+        ):
+            background_tasks.add_task(
+                webhook_sync_module.sync_company_property,
+                str(event.object_id),
+                event.property_name,
+                event.property_value,
             )
         else:
             logger.warning(

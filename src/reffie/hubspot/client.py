@@ -278,6 +278,10 @@ TECH_STACK_PROPERTIES: list[str] = [
 # from TECH_STACK_PROPERTIES so the two concerns can evolve independently.
 COMPANY_LOCATION_PROPERTIES: list[str] = ["state"]
 
+# Company-level onboarding properties. Kept separate so each concern can grow
+# independently without touching the others.
+COMPANY_ONBOARDING_PROPERTIES: list[str] = ["onboarding_cs_rep"]
+
 
 async def get_deal_company_id(deal_id: str, settings: Settings) -> str | None:
     """

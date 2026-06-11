@@ -58,6 +58,7 @@ _COMPANY_PROPS: dict[str, str | None] = {
     "pms_system": "Entrata",
     "tour_scheduling_platform": "Showing Suite",
     "uses_lockboxes": "false",
+    "onboarding_cs_rep": None,  # not set at company level unless overridden in a specific test
     "applications_platform": "ResidentCheck",
     "zillow_tier": "Paid",
     "facebook_marketplace": "true",
@@ -700,3 +701,60 @@ async def test_property_type_single_value_no_semicolons(mock_session: AsyncMock)
 async def test_property_type_empty_stays_empty(mock_session: AsyncMock) -> None:
     created = await _run_pull_deal_with_property_type(mock_session, "")
     assert created.property_type == ""
+
+
+# ---------------------------------------------------------------------------
+# Company-level onboarding_cs_rep wins over deal-level value
+# ---------------------------------------------------------------------------
+
+
+async def test_sync_company_cs_rep_wins_over_deal(mock_session: AsyncMock) -> None:
+    """Company-level onboarding_cs_rep overrides the deal-level value when non-empty."""
+    _setup_new_account_session(mock_session, make_loaded_account())
+    company_props_with_rep: dict[str, str | None] = {
+        **_COMPANY_PROPS,
+        "onboarding_cs_rep": "Carol",
+    }
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch("reffie.hubspot.client.get_deal_contact_ids", new=AsyncMock(return_value=[])),
+        mock.patch("reffie.hubspot.client.get_deal_company_id", new=AsyncMock(return_value="co-1")),
+        mock.patch(
+            "reffie.hubspot.client.get_company_properties",
+            new=AsyncMock(return_value=company_props_with_rep),
+        ),
+    ):
+        await sync_module.pull_deal(_DEAL_ID, mock_session, _settings)
+
+    created: Account = mock_session.add.call_args.args[0]
+    # Deal has cs_rep "Alice" (from _DEAL_RESPONSE); company has "Carol" — company wins.
+    assert created.cs_rep == "Carol"
+
+
+async def test_sync_deal_cs_rep_used_when_company_value_empty(mock_session: AsyncMock) -> None:
+    """When company-level onboarding_cs_rep is empty/None, deal value is preserved."""
+    _setup_new_account_session(mock_session, make_loaded_account())
+    company_props_no_rep: dict[str, str | None] = {
+        **_COMPANY_PROPS,
+        "onboarding_cs_rep": None,
+    }
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE),
+        ),
+        mock.patch("reffie.hubspot.client.get_deal_contact_ids", new=AsyncMock(return_value=[])),
+        mock.patch("reffie.hubspot.client.get_deal_company_id", new=AsyncMock(return_value="co-1")),
+        mock.patch(
+            "reffie.hubspot.client.get_company_properties",
+            new=AsyncMock(return_value=company_props_no_rep),
+        ),
+    ):
+        await sync_module.pull_deal(_DEAL_ID, mock_session, _settings)
+
+    created: Account = mock_session.add.call_args.args[0]
+    # Company has no rep; deal fallback "Alice" (from _DEAL_RESPONSE) is used.
+    assert created.cs_rep == "Alice"

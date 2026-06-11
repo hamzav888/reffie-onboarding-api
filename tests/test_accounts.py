@@ -71,6 +71,7 @@ def mock_writeback() -> Generator[None]:
     with (
         mock.patch("reffie.hubspot.writeback.sync_stage_to_hubspot", new=AsyncMock()),
         mock.patch("reffie.hubspot.writeback.sync_tech_stack_to_hubspot", new=AsyncMock()),
+        mock.patch("reffie.hubspot.writeback.sync_cs_rep_to_hubspot", new=AsyncMock()),
     ):
         yield
 
