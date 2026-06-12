@@ -116,10 +116,7 @@ async def hubspot_webhook(
             event.property_name,
             event.property_value,
         )
-        if (
-            event.subscription_type == "deal.propertyChange"
-            and event.property_name == "dealstage"
-        ):
+        if event.subscription_type == "deal.propertyChange" and event.property_name == "dealstage":
             if event.property_value in settings.hubspot_closed_won_stage_ids:
                 background_tasks.add_task(
                     auto_create_module.process_closed_won,

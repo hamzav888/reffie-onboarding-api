@@ -201,7 +201,11 @@ async def refresh_all(settings: Settings) -> None:
                 if deal_id == "":
                     continue
 
-                data = await _fetch_deal_data(deal_id, settings)
+                try:
+                    data = await _fetch_deal_data(deal_id, settings)
+                except (HubSpotAPIError, HubSpotNotFoundError):
+                    logger.warning("refresh_all: skipping deal %s due to HubSpot error", deal_id)
+                    continue
                 if data is None:
                     continue
 
@@ -219,9 +223,7 @@ async def refresh_all(settings: Settings) -> None:
             # Delete rows for deals no longer in the upcoming stages.
             if fetched_ids != []:
                 await session.execute(
-                    delete(UpcomingDeal).where(
-                        UpcomingDeal.hubspot_deal_id.not_in(fetched_ids)
-                    )
+                    delete(UpcomingDeal).where(UpcomingDeal.hubspot_deal_id.not_in(fetched_ids))
                 )
 
             await session.commit()

@@ -13,7 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy.exc import SQLAlchemyError
 
 from reffie.config import settings as _settings
+from reffie.hubspot.client import HubSpotAPIError, HubSpotNotFoundError
 from reffie.hubspot.upcoming_deals import (
+    _fetch_deal_data,  # pyright: ignore[reportPrivateUsage]
     fetch_and_upsert_deal,
     refresh_all,
     remove_deal,
@@ -204,7 +206,7 @@ async def test_refresh_all_upserts_and_prunes_stale() -> None:
     delete_result = MagicMock()
     session.execute.side_effect = [new_row_result, delete_result]
 
-    all_deals = [{"id": "deal-1", "properties": {}}]
+    all_deals: list[dict[str, object]] = [{"id": "deal-1", "properties": {}}]
 
     with (
         mock.patch(
@@ -285,3 +287,109 @@ async def test_refresh_all_swallows_db_error() -> None:
     ):
         await refresh_all(_settings)
     # Must not raise.
+
+
+# ---------------------------------------------------------------------------
+# _fetch_deal_data — company and owner edge-case paths
+# ---------------------------------------------------------------------------
+
+_DEAL_RESPONSE_BLANK_OWNER: dict[str, object] = {
+    "id": _DEAL_ID,
+    "properties": {
+        "dealname": "Test Deal",
+        "dealstage": "1713761016",
+        "amount": "50000",
+        "closedate": "2026-10-01",
+        "hubspot_owner_id": "",
+    },
+}
+
+_DEAL_RESPONSE_WITH_OWNER: dict[str, object] = {
+    "id": _DEAL_ID,
+    "properties": {
+        "dealname": "Test Deal",
+        "dealstage": "1713761016",
+        "amount": "50000",
+        "closedate": "2026-10-01",
+        "hubspot_owner_id": "owner-99",
+    },
+}
+
+
+async def test_fetch_deal_data_no_company_returns_empty_tech_stack() -> None:
+    """get_deal_company_id returning None → tech_stack is {}."""
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE_BLANK_OWNER),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        result = await _fetch_deal_data(_DEAL_ID, _settings)
+
+    assert result is not None
+    assert result["tech_stack"] == {}
+
+
+async def test_fetch_deal_data_company_fetch_error_returns_empty_tech_stack() -> None:
+    """get_deal_company_id raising HubSpotAPIError → tech_stack is {}."""
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE_BLANK_OWNER),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(side_effect=HubSpotAPIError("API error")),
+        ),
+    ):
+        result = await _fetch_deal_data(_DEAL_ID, _settings)
+
+    assert result is not None
+    assert result["tech_stack"] == {}
+
+
+async def test_fetch_deal_data_blank_owner_id_returns_none_rep() -> None:
+    """Blank hubspot_owner_id → sales_rep_name is None; get_owner never called."""
+    mock_get_owner = AsyncMock()
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE_BLANK_OWNER),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value=None),
+        ),
+        mock.patch("reffie.hubspot.client.get_owner", mock_get_owner),
+    ):
+        result = await _fetch_deal_data(_DEAL_ID, _settings)
+
+    assert result is not None
+    assert result["sales_rep_name"] is None
+    mock_get_owner.assert_not_called()
+
+
+async def test_fetch_deal_data_owner_fetch_error_returns_none_rep() -> None:
+    """get_owner raising HubSpotNotFoundError → sales_rep_name is None."""
+    with (
+        mock.patch(
+            "reffie.hubspot.client.get_deal_properties",
+            new=AsyncMock(return_value=_DEAL_RESPONSE_WITH_OWNER),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_deal_company_id",
+            new=AsyncMock(return_value=None),
+        ),
+        mock.patch(
+            "reffie.hubspot.client.get_owner",
+            new=AsyncMock(side_effect=HubSpotNotFoundError("404")),
+        ),
+    ):
+        result = await _fetch_deal_data(_DEAL_ID, _settings)
+
+    assert result is not None
+    assert result["sales_rep_name"] is None

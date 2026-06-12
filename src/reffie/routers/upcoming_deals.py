@@ -73,9 +73,7 @@ async def get_upcoming_deal(
     :returns: The matching upcoming deal.
     :raises HTTPException: 404 if not found.
     """
-    result = await db_session.execute(
-        select(UpcomingDeal).where(UpcomingDeal.id == deal_id)
-    )
+    result = await db_session.execute(select(UpcomingDeal).where(UpcomingDeal.id == deal_id))
     row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Upcoming deal not found")

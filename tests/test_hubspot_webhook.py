@@ -491,6 +491,29 @@ async def test_webhook_dealstage_closed_won_dispatches_autocreate_and_remove() -
     mock_upsert.assert_not_called()
 
 
+async def test_webhook_dealstage_closed_lost_schedules_remove() -> None:
+    """Closed Lost stage dispatches remove_deal (same as any non-upcoming stage)."""
+    body = json.dumps([_make_event(property_value="closedlost", object_id=9002)])
+    mock_upsert = AsyncMock()
+    mock_remove = AsyncMock()
+    mock_process = AsyncMock()
+    with (
+        mock.patch("reffie.hubspot.upcoming_deals.fetch_and_upsert_deal", mock_upsert),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", mock_remove),
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    mock_remove.assert_called_once_with("9002")
+    mock_upsert.assert_not_called()
+    mock_process.assert_not_called()
+
+
 async def test_webhook_company_unmapped_property_is_skipped() -> None:
     body = json.dumps(
         [

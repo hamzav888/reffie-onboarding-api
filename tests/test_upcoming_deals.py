@@ -74,9 +74,7 @@ def override_deps(mock_session: AsyncMock) -> Generator[None]:
 @pytest.fixture(autouse=True)
 def mock_refresh() -> Generator[None]:
     """Suppress the real refresh_all background task for router tests."""
-    with mock.patch(
-        "reffie.hubspot.upcoming_deals.refresh_all", new=AsyncMock()
-    ):
+    with mock.patch("reffie.hubspot.upcoming_deals.refresh_all", new=AsyncMock()):
         yield
 
 
