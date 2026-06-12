@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     hubspot_webhook_secret: str = ""
     # Pipeline-specific stage IDs that represent Closed Won (comma-separated in env).
     hubspot_closed_won_stage_ids: list[str] = []
+    # Stage IDs for deals in the upcoming pipeline (Demo Completed, Negotiations, etc.).
+    hubspot_upcoming_stage_ids: list[str] = []
 
     @classmethod
     def settings_customise_sources(
@@ -78,7 +80,7 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",")]
         return v
 
-    @field_validator("hubspot_closed_won_stage_ids", mode="before")
+    @field_validator("hubspot_closed_won_stage_ids", "hubspot_upcoming_stage_ids", mode="before")
     @classmethod
     def _parse_stage_ids(cls, v: Any) -> Any:
         """Split a comma-separated string into a list; pass lists through unchanged."""

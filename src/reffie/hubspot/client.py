@@ -364,6 +364,99 @@ async def update_company_properties(
     _check_response(response, f"company {company_id}")
 
 
+async def search_deals_by_stage(
+    stage_ids: list[str],
+    settings: Settings,
+    after: str | None = None,
+) -> dict[str, Any]:
+    """
+    Search HubSpot deals whose ``dealstage`` is one of ``stage_ids``.
+
+    Uses the CRM v3 Search API with an ``IN`` filter. Returns the raw
+    response dict containing ``results`` and optionally ``paging``.
+
+    :param stage_ids: List of HubSpot stage IDs to filter on.
+    :param settings: Application settings providing HubSpot credentials.
+    :param after: Pagination cursor from a previous response's ``paging.next.after``.
+    :returns: Raw HubSpot search response dict.
+    :raises HubSpotAPIError: For 4xx/5xx responses.
+    """
+    body: dict[str, Any] = {
+        "filterGroups": [
+            {
+                "filters": [
+                    {
+                        "propertyName": "dealstage",
+                        "operator": "IN",
+                        "values": stage_ids,
+                    }
+                ]
+            }
+        ],
+        "properties": ["dealname", "dealstage", "amount", "closedate", "hubspot_owner_id"],
+        "limit": 100,
+    }
+    if after is not None:
+        body["after"] = after
+    async with httpx.AsyncClient(
+        base_url=settings.hubspot_base_url,
+        headers={"Authorization": f"Bearer {settings.hubspot_token}"},
+    ) as client:
+        response = await client.post("/crm/v3/objects/deals/search", json=body)
+    _check_response(response, "deals search by stage")
+    result: dict[str, Any] = response.json()
+    return result
+
+
+async def search_deals_by_stage_all(
+    stage_ids: list[str],
+    settings: Settings,
+) -> list[dict[str, Any]]:
+    """
+    Paginate through all HubSpot deals in the given stages.
+
+    Repeatedly calls :func:`search_deals_by_stage`, following
+    ``paging.next.after`` until no further pages exist.
+
+    :param stage_ids: List of HubSpot stage IDs to filter on.
+    :param settings: Application settings providing HubSpot credentials.
+    :returns: Combined list of all deal result dicts across all pages.
+    :raises HubSpotAPIError: For 4xx/5xx responses on any page.
+    """
+    all_results: list[dict[str, Any]] = []
+    after: str | None = None
+    while True:
+        page = await search_deals_by_stage(stage_ids, settings, after=after)
+        all_results.extend(page.get("results", []))
+        next_page: dict[str, Any] | None = page.get("paging", {}).get("next")
+        if next_page is None:
+            break
+        after = next_page.get("after")
+        if after is None:
+            break
+    return all_results
+
+
+async def get_owner(owner_id: str, settings: Settings) -> dict[str, Any]:
+    """
+    Fetch a HubSpot owner record by ID.
+
+    :param owner_id: HubSpot owner object ID.
+    :param settings: Application settings providing HubSpot credentials.
+    :returns: Raw owner dict (contains ``firstName``, ``lastName``, ``email``, etc.).
+    :raises HubSpotNotFoundError: If the owner does not exist.
+    :raises HubSpotAPIError: For other 4xx/5xx responses.
+    """
+    async with httpx.AsyncClient(
+        base_url=settings.hubspot_base_url,
+        headers={"Authorization": f"Bearer {settings.hubspot_token}"},
+    ) as client:
+        response = await client.get(f"/crm/v3/owners/{owner_id}")
+    _check_response(response, f"owner {owner_id}")
+    result: dict[str, Any] = response.json()
+    return result
+
+
 async def update_deal_properties(
     deal_id: str,
     properties: dict[str, str],

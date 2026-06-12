@@ -17,6 +17,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 import reffie.hubspot.auto_create as auto_create_module
+import reffie.hubspot.upcoming_deals as upcoming_deals_module
 import reffie.hubspot.webhook_sync as webhook_sync_module
 from reffie.config import Settings, get_settings
 from reffie.schemas.hubspot_webhook import HubSpotWebhookEvent
@@ -118,13 +119,26 @@ async def hubspot_webhook(
         if (
             event.subscription_type == "deal.propertyChange"
             and event.property_name == "dealstage"
-            and event.property_value in settings.hubspot_closed_won_stage_ids
         ):
-            background_tasks.add_task(
-                auto_create_module.process_closed_won,
-                str(event.object_id),
-                settings,
-            )
+            if event.property_value in settings.hubspot_closed_won_stage_ids:
+                background_tasks.add_task(
+                    auto_create_module.process_closed_won,
+                    str(event.object_id),
+                    settings,
+                )
+            if event.property_value in settings.hubspot_upcoming_stage_ids:
+                background_tasks.add_task(
+                    upcoming_deals_module.fetch_and_upsert_deal,
+                    str(event.object_id),
+                    settings,
+                )
+            else:
+                # Stage changed to something that is not an upcoming stage — remove from
+                # the upcoming-deals cache. Idempotent if the deal was never cached.
+                background_tasks.add_task(
+                    upcoming_deals_module.remove_deal,
+                    str(event.object_id),
+                )
         elif (
             event.subscription_type == "deal.propertyChange"
             and event.property_name in webhook_sync_module.WEBHOOK_FIELD_MAP

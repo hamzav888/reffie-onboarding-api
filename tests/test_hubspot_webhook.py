@@ -218,7 +218,10 @@ async def test_webhook_v3_replay_protection() -> None:
 async def test_webhook_v1_signature_valid() -> None:
     body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
     mock_process = AsyncMock()
-    with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
+    with (
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", AsyncMock()),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/hubspot/webhook",
@@ -233,7 +236,10 @@ async def test_webhook_v1_signature_valid() -> None:
 async def test_webhook_v2_signature_valid() -> None:
     body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
     mock_process = AsyncMock()
-    with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
+    with (
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", AsyncMock()),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/hubspot/webhook",
@@ -248,7 +254,10 @@ async def test_webhook_v2_signature_valid() -> None:
 async def test_webhook_v3_signature_valid() -> None:
     body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
     mock_process = AsyncMock()
-    with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
+    with (
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", AsyncMock()),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/hubspot/webhook",
@@ -279,10 +288,13 @@ async def test_webhook_irrelevant_event_no_task_scheduled() -> None:
     mock_process.assert_not_called()
 
 
-async def test_webhook_non_closed_won_stage_no_task_scheduled() -> None:
+async def test_webhook_non_closed_won_stage_no_autocreate_scheduled() -> None:
     body = json.dumps([_make_event(property_value="appointmentscheduled")])
     mock_process = AsyncMock()
-    with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
+    with (
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", AsyncMock()),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/hubspot/webhook",
@@ -296,7 +308,10 @@ async def test_webhook_non_closed_won_stage_no_task_scheduled() -> None:
 async def test_webhook_closed_won_schedules_task() -> None:
     body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
     mock_process = AsyncMock()
-    with mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process):
+    with (
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", AsyncMock()),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/hubspot/webhook",
@@ -343,6 +358,7 @@ async def test_webhook_closed_won_does_not_trigger_property_sync() -> None:
     with (
         mock.patch("reffie.hubspot.webhook_sync.sync_deal_property", mock_sync),
         mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", AsyncMock()),
     ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -404,6 +420,75 @@ async def test_webhook_company_cs_rep_change_schedules_sync() -> None:
     mock_company_sync.assert_called_once_with("8001", "onboarding_cs_rep", "Carol")
     mock_deal_sync.assert_not_called()
     mock_process.assert_not_called()
+
+
+async def test_webhook_dealstage_upcoming_schedules_upsert() -> None:
+    """dealstage change to an upcoming stage dispatches fetch_and_upsert_deal."""
+    body = json.dumps([_make_event(property_value="1713761016", object_id=9001)])
+    mock_upsert = AsyncMock()
+    mock_remove = AsyncMock()
+    mock_process = AsyncMock()
+    with (
+        mock.patch("reffie.hubspot.upcoming_deals.fetch_and_upsert_deal", mock_upsert),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", mock_remove),
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    mock_upsert.assert_called_once_with("9001", _settings)
+    mock_remove.assert_not_called()
+    mock_process.assert_not_called()
+
+
+async def test_webhook_dealstage_non_upcoming_non_cw_schedules_remove() -> None:
+    """dealstage change to a non-upcoming, non-CW stage dispatches remove_deal."""
+    body = json.dumps([_make_event(property_value="appointmentscheduled", object_id=9001)])
+    mock_upsert = AsyncMock()
+    mock_remove = AsyncMock()
+    mock_process = AsyncMock()
+    with (
+        mock.patch("reffie.hubspot.upcoming_deals.fetch_and_upsert_deal", mock_upsert),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", mock_remove),
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    mock_remove.assert_called_once_with("9001")
+    mock_upsert.assert_not_called()
+    mock_process.assert_not_called()
+
+
+async def test_webhook_dealstage_closed_won_dispatches_autocreate_and_remove() -> None:
+    """CW stage dispatches auto_create AND remove_deal (cleans the upcoming cache)."""
+    body = json.dumps([_make_event(property_value=_CLOSED_WON_STAGE, object_id=9001)])
+    mock_upsert = AsyncMock()
+    mock_remove = AsyncMock()
+    mock_process = AsyncMock()
+    with (
+        mock.patch("reffie.hubspot.upcoming_deals.fetch_and_upsert_deal", mock_upsert),
+        mock.patch("reffie.hubspot.upcoming_deals.remove_deal", mock_remove),
+        mock.patch("reffie.hubspot.auto_create.process_closed_won", mock_process),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/hubspot/webhook",
+                content=body,
+                headers=_v1_headers(body),
+            )
+    assert response.status_code == 200
+    mock_process.assert_called_once_with("9001", _settings)
+    mock_remove.assert_called_once_with("9001")
+    mock_upsert.assert_not_called()
 
 
 async def test_webhook_company_unmapped_property_is_skipped() -> None:
